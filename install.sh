@@ -27,6 +27,18 @@ export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/oma
 
 ufw_active() { command -v ufw >/dev/null && sudo ufw status 2>/dev/null | grep -q "^Status: active"; }
 
+# Ask for the sudo password once, up front, in this terminal. Without a
+# terminal (an agent's shell, a launcher) sudo can't ask, so say so and stop.
+if ! sudo -n true 2>/dev/null; then
+  if [[ ! -t 0 ]]; then
+    echo "install.sh needs sudo, and this shell has no terminal to ask for the password." >&2
+    echo "Run it from a terminal or an SSH session." >&2
+    exit 1
+  fi
+  echo "install.sh needs sudo for the udev rule, the binary and the firewall."
+  sudo -v
+fi
+
 if [[ ${1:-} == --uninstall ]]; then
   systemctl --user disable --now omakeyd 2>/dev/null || true
   rm -f "$UNIT"
