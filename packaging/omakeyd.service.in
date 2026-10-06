@@ -1,0 +1,12 @@
+[Unit]
+Description=Omakey: your phone as a keyboard
+Documentation=https://github.com/gladimdim/omakey-omarchy-plugin
+After=network-online.target
+
+[Service]
+ExecStart=@BIN@ run
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

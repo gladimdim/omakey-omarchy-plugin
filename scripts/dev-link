@@ -1,0 +1,13 @@
+#!/bin/bash
+# Link this checkout in as the installed plugin, for development.
+# Saving a QML file then hot-reloads it in the shell.
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DEST="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins/gladimdim.omakey"
+if [[ -e $DEST && ! -L $DEST ]]; then
+  echo "$DEST exists and isn't a link; remove it first." >&2
+  exit 1
+fi
+ln -sfn "$ROOT" "$DEST"
+echo "Linked $DEST -> $ROOT"
+echo "Enable it with: omarchy plugin enable gladimdim.omakey --section right"

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "gladimdim.omakey",
+  "name": "Omakey",
+  "version": "0.1.0",
+  "author": "gladimdim",
+  "license": "MIT",
+  "description": "Use your phone as a real keyboard. Pair the Omakey app with a QR code and type, hold SUPER + SPACE, press F1-F12 and Esc, over Wi-Fi.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Omakey",
+    "description": "Pair phones and see which are typing",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

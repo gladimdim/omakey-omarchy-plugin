@@ -1,0 +1,24 @@
+[package]
+name = "omakeyd"
+version = "0.1.0"
+edition = "2021"
+description = "Omakey daemon: turns a paired phone into a real keyboard on Omarchy"
+license = "MIT"
+
+[dependencies]
+aes-gcm = "0.10"
+hkdf = "0.12"
+sha2 = "0.10"
+getrandom = "0.2"
+evdev = "0.13"
+mdns-sd = "0.21"
+qrcode = { version = "0.14", default-features = false }
+base64 = "0.22"
+if-addrs = "0.15"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
