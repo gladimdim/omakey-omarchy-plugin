@@ -108,7 +108,11 @@ server_random   16
 session_id       4
 name_len         1
 name             name_len   UTF-8 host name
+features         1          optional; bit 0 = touchpad (pointer) support
 ```
+
+Servers before the touchpad send no `features` byte; read it as 0. Clients
+ignore any bytes after the fields they know.
 
 Both sides then derive two 32-byte keys with HKDF-SHA256:
 
@@ -137,6 +141,24 @@ events           event_count × 5:
   code           2    Linux key code (input-event-codes.h)
   value          1    1 = press, 0 = release
 ```
+
+Optional pointer trailer, after the events (clients without a touchpad omit it):
+
+```
+pointer_len      1    8; a server skips whatever follows its known fields
+dx               2    signed relative motion, mouse counts
+dy               2    signed
+wheel            2    signed vertical scroll in 1/120 of a notch; positive scrolls up
+hwheel           2    signed horizontal scroll in 1/120 of a notch; positive scrolls right
+```
+
+Motion and scroll since the previous INPUT, sent once and never repeated:
+a lost packet loses that bit of motion, as a mouse would. Touchpad buttons
+are not here: `BTN_LEFT` (0x110), `BTN_RIGHT` (0x111) and `BTN_MIDDLE`
+(0x112) travel as ordinary held codes and events, so a click is never lost
+and a held button is released like a key when the phone goes quiet. The
+server sends them, the motion and the scroll to a separate virtual mouse
+(`Omakey Mouse`) so the keyboard device never looks like a pointer.
 
 Events are in ascending `eseq` order. The client includes every event the
 server has not acknowledged yet, newest last, at most 32 (drop the oldest
@@ -184,17 +206,18 @@ it never deletes its pairing because of a REJECT.
 ## Test vectors
 
 `docs/test-vectors.json` (from `omakeyd test-vectors`) has fixed keys,
-randoms and nonces and the exact datagrams they produce: HELLO, WELCOME,
-two INPUTs (SUPER down, then SPACE down with both events un-acked), ACK and
-BYE. Every implementation must reproduce them byte for byte.
+randoms and nonces and the exact datagrams they produce: HELLO, WELCOME
+(with the touchpad feature), two INPUTs (SUPER down, then SPACE down with
+both events un-acked), an INPUT with the left button held and a pointer
+trailer, ACK and BYE. Every implementation must reproduce them byte for byte.
 
 ## Safety rules on the server
 
 - A session that holds keys and sends nothing for **500 ms** has all its keys
   released. The next INPUT presses them again through the held set.
 - A session silent for **30 s** is dropped.
-- Key codes are limited to `1..=255` and `0x160..=0x2bf`; anything else is
-  ignored. Mouse buttons are never sent.
+- Key codes are limited to `1..=255`, `0x160..=0x2bf` and the touchpad
+  buttons `0x110..=0x112`; anything else is ignored.
 - Several phones may be connected; a key is down on the virtual keyboard
   while any session holds it.
 - On shutdown the server releases everything before destroying the device.

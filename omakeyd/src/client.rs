@@ -113,6 +113,8 @@ pub struct Client {
     eseq: u16,
     unacked: VecDeque<Event>,
     held: BTreeSet<u16>,
+    /// Touchpad motion for the next INPUT only (motion is never resent).
+    pending_pointer: Option<Pointer>,
 }
 
 impl Client {
@@ -131,6 +133,7 @@ impl Client {
             eseq: 0,
             unacked: VecDeque::new(),
             held: BTreeSet::new(),
+            pending_pointer: None,
         }
     }
 
@@ -200,6 +203,12 @@ impl Client {
         self.input(now_ms)
     }
 
+    /// Queue touchpad motion; returns the INPUT carrying it.
+    pub fn pointer(&mut self, p: Pointer, now_ms: u32) -> Option<Vec<u8>> {
+        self.pending_pointer = Some(p);
+        self.input(now_ms)
+    }
+
     pub fn has_unacked(&self) -> bool {
         !self.unacked.is_empty()
     }
@@ -213,6 +222,7 @@ impl Client {
             flags: 0,
             held: self.held.iter().copied().collect(),
             events: self.unacked.iter().copied().collect(),
+            pointer: self.pending_pointer.take(),
         }
         .encode();
         let h = Header { kind: T_INPUT, device_id: self.device_id, nonce: session_nonce(live.session_id, self.counter) };

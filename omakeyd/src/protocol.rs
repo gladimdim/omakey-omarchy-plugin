@@ -22,6 +22,9 @@ pub const T_REJECT: u8 = 6;
 
 pub const REJECT_UNKNOWN_DEVICE: u8 = 1;
 
+/// WELCOME feature bits.
+pub const FEATURE_POINTER: u8 = 1;
+
 pub type DeviceId = [u8; 8];
 pub type Key = [u8; 32];
 
@@ -143,6 +146,12 @@ impl<'a> Reader<'a> {
     fn u16(&mut self) -> Option<u16> {
         self.take(2).map(|s| u16::from_be_bytes([s[0], s[1]]))
     }
+    fn i16(&mut self) -> Option<i16> {
+        self.u16().map(|v| v as i16)
+    }
+    fn remaining(&self) -> usize {
+        self.buf.len() - self.pos
+    }
     fn u32(&mut self) -> Option<u32> {
         self.take(4).map(|s| u32::from_be_bytes(s.try_into().unwrap()))
     }
@@ -192,6 +201,8 @@ pub struct Welcome {
     pub server_random: [u8; 16],
     pub session_id: u32,
     pub name: String,
+    /// FEATURE_* bits; 0 from servers that predate them.
+    pub features: u8,
 }
 
 impl Welcome {
@@ -201,6 +212,7 @@ impl Welcome {
         out.extend_from_slice(&self.server_random);
         out.extend_from_slice(&self.session_id.to_be_bytes());
         push_name(&mut out, &self.name);
+        out.push(self.features);
         out
     }
     pub fn decode(buf: &[u8]) -> Option<Welcome> {
@@ -210,6 +222,7 @@ impl Welcome {
             server_random: r.arr16()?,
             session_id: r.u32()?,
             name: r.name()?,
+            features: r.u8().unwrap_or(0),
         })
     }
 }
@@ -221,12 +234,27 @@ pub struct Event {
     pub down: bool,
 }
 
+/// Relative pointer motion and scroll since the previous INPUT.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Pointer {
+    pub dx: i16,
+    pub dy: i16,
+    /// Vertical scroll in 1/120 of a wheel notch; positive scrolls up.
+    pub wheel: i16,
+    /// Horizontal scroll in 1/120 of a notch; positive scrolls right.
+    pub hwheel: i16,
+}
+
+pub const POINTER_LEN: u8 = 8;
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Input {
     pub client_time_ms: u32,
     pub flags: u8,
     pub held: Vec<u16>,
     pub events: Vec<Event>,
+    /// Optional trailer; absent in packets from clients without a touchpad.
+    pub pointer: Option<Pointer>,
 }
 
 impl Input {
@@ -243,6 +271,12 @@ impl Input {
             out.extend_from_slice(&e.eseq.to_be_bytes());
             out.extend_from_slice(&e.code.to_be_bytes());
             out.push(e.down as u8);
+        }
+        if let Some(p) = self.pointer {
+            out.push(POINTER_LEN);
+            for v in [p.dx, p.dy, p.wheel, p.hwheel] {
+                out.extend_from_slice(&v.to_be_bytes());
+            }
         }
         out
     }
@@ -266,7 +300,21 @@ impl Input {
             let down = r.u8()? != 0;
             events.push(Event { eseq, code, down });
         }
-        Some(Input { client_time_ms, flags, held, events })
+        // Trailer: a length byte, so later fields can be added and skipped.
+        let pointer = if r.remaining() > 0 {
+            let len = r.u8()? as usize;
+            if len >= POINTER_LEN as usize {
+                let p = Pointer { dx: r.i16()?, dy: r.i16()?, wheel: r.i16()?, hwheel: r.i16()? };
+                r.take(len - POINTER_LEN as usize)?;
+                Some(p)
+            } else {
+                r.take(len)?;
+                None
+            }
+        } else {
+            None
+        };
+        Some(Input { client_time_ms, flags, held, events, pointer })
     }
 }
 
@@ -341,9 +389,35 @@ mod tests {
                 Event { eseq: 65535, code: 125, down: true },
                 Event { eseq: 0, code: 57, down: true },
             ],
+            pointer: None,
         };
         assert_eq!(Input::decode(&i.encode()).unwrap(), i);
         assert!(Input::decode(&i.encode()[..9]).is_none());
+    }
+
+    #[test]
+    fn pointer_trailer_round_trips_and_is_optional() {
+        let mut i = Input { client_time_ms: 7, held: vec![0x110], ..Default::default() };
+        let plain = i.encode();
+        assert_eq!(Input::decode(&plain).unwrap().pointer, None);
+        i.pointer = Some(Pointer { dx: -5, dy: 300, wheel: -120, hwheel: 30 });
+        let with = i.encode();
+        assert_eq!(with.len(), plain.len() + 9);
+        assert_eq!(Input::decode(&with).unwrap(), i);
+        // A longer trailer from a future client still parses.
+        let mut longer = with.clone();
+        let at = plain.len();
+        longer[at] = 10;
+        longer.extend_from_slice(&[0, 0]);
+        assert_eq!(Input::decode(&longer).unwrap().pointer, i.pointer);
+    }
+
+    #[test]
+    fn welcome_features_default_to_zero_for_old_servers() {
+        let w = Welcome { client_random: [1; 16], server_random: [2; 16], session_id: 9, name: "d".into(), features: 1 };
+        let enc = w.encode();
+        assert_eq!(Welcome::decode(&enc).unwrap(), w);
+        assert_eq!(Welcome::decode(&enc[..enc.len() - 1]).unwrap().features, 0);
     }
 
     #[test]

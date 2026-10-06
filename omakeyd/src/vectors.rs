@@ -28,7 +28,9 @@ pub fn generate() -> serde_json::Value {
     let mut client = Client::with_random(device_id, key, client_random);
     let hello = client.hello_with_nonce("Pixel 9", hello_nonce);
 
-    let welcome_body = Welcome { client_random, server_random, session_id, name: "omarchy desk".into() }.encode();
+    let welcome_body =
+        Welcome { client_random, server_random, session_id, name: "omarchy desk".into(), features: FEATURE_POINTER }
+            .encode();
     let welcome = seal(
         &cipher(&key),
         &Header { kind: T_WELCOME, device_id, nonce: welcome_nonce },
@@ -46,6 +48,11 @@ pub fn generate() -> serde_json::Value {
         &Header { kind: T_ACK, device_id, nonce: session_nonce(session_id, 1) },
         &Ack { client_time_ms: 1016, last_eseq: 2 }.encode(),
     );
+    // Left button down (event 3) with motion and a scroll in the same packet (counter 3).
+    let input3 = {
+        client.key(0x110, true, 1032);
+        client.pointer(Pointer { dx: -12, dy: 34, wheel: 120, hwheel: -60 }, 1033).unwrap()
+    };
     let bye = client.bye().unwrap();
 
     json!({
@@ -60,10 +67,13 @@ pub fn generate() -> serde_json::Value {
         "kcs": hex(&keys.c2s),
         "ksc": hex(&keys.s2c),
         "hello": { "name": "Pixel 9", "platform": 1, "nonce": hex(&hello_nonce), "packet": hex(&hello) },
-        "welcome": { "host_name": "omarchy desk", "nonce": hex(&welcome_nonce), "packet": hex(&welcome) },
+        "welcome": { "host_name": "omarchy desk", "features": FEATURE_POINTER, "nonce": hex(&welcome_nonce), "packet": hex(&welcome) },
         "input1": { "counter": 1, "client_time_ms": 1000, "held": [125], "events": [[1, 125, 1]], "packet": hex(&input1) },
         "input2": { "counter": 2, "client_time_ms": 1016, "held": [57, 125], "events": [[1, 125, 1], [2, 57, 1]], "packet": hex(&input2) },
         "ack": { "counter": 1, "client_time_ms": 1016, "last_eseq": 2, "packet": hex(&ack) },
-        "bye": { "counter": 3, "packet": hex(&bye) },
+        "input4": { "counter": 4, "client_time_ms": 1033, "held": [57, 125, 272], "events": [[1, 125, 1], [2, 57, 1], [3, 272, 1]],
+                    "pointer": { "dx": -12, "dy": 34, "wheel": 120, "hwheel": -60 }, "packet": hex(&input3),
+                    "note": "counter 3 was the INPUT sent by the button press itself; this is the next one" },
+        "bye": { "counter": 5, "packet": hex(&bye) },
     })
 }

@@ -235,3 +235,41 @@ fn second_phone_holding_same_key_keeps_it_down() {
     r.server.handle(&p, r.addr, r.t0 + Duration::from_millis(30));
     assert!(!r.server.key_down(A));
 }
+
+#[test]
+fn touchpad_buttons_and_motion_reach_the_mouse() {
+    use crate::keyboard::BTN_LEFT;
+    let mut r = Rig::new();
+    r.connect();
+    r.key(BTN_LEFT, true, 10);
+    let p = Pointer { dx: 5, dy: -3, wheel: 0, hwheel: 0 };
+    let pkt = r.client.pointer(p, 11).unwrap();
+    r.send(pkt, 11);
+    r.key(BTN_LEFT, false, 12);
+    assert_eq!(r.rec.take(), vec![(BTN_LEFT, true), (BTN_LEFT, false)]);
+    assert_eq!(*r.rec.1.lock().unwrap(), vec![p]);
+    // Motion isn't resent with the next heartbeat.
+    let hb = r.client.input(20).unwrap();
+    r.send(hb, 20);
+    assert_eq!(r.rec.1.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn a_held_button_is_released_when_the_phone_goes_quiet() {
+    use crate::keyboard::BTN_LEFT;
+    let mut r = Rig::new();
+    r.connect();
+    r.key(BTN_LEFT, true, 10);
+    r.server.tick(r.t0 + Duration::from_millis(700));
+    assert!(!r.server.key_down(BTN_LEFT));
+}
+
+#[test]
+fn welcome_advertises_the_touchpad() {
+    let mut r = Rig::new();
+    let hello = r.client.hello("Pixel");
+    let reply = r.server.handle(&hello, r.addr, r.t0).unwrap();
+    let key = r.shared.lock().unwrap().devices.devices[0].key_bytes().unwrap();
+    let w = Welcome::decode(&open(&cipher(&key), &reply).unwrap()).unwrap();
+    assert_eq!(w.features & FEATURE_POINTER, FEATURE_POINTER);
+}

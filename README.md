@@ -18,6 +18,9 @@ as you like, just as on a Bluetooth keyboard, but over Wi-Fi.
 - **Private.** The QR code holds a 256-bit key; every packet is encrypted
   and authenticated (AES-256-GCM), with replay protection. Nobody else on
   the Wi-Fi can type on your machine.
+- **Touchpad too.** Pull the touchpad down in the app to move the mouse,
+  click, right-click and scroll. It is a second virtual device, "Omakey
+  Mouse", next to "Omakey Keyboard".
 - **Bar widget.** See which phones are connected, pair new ones, and forget
   old ones.
 

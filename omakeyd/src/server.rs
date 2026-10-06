@@ -162,6 +162,7 @@ impl Server {
             server_random,
             session_id,
             name: self.host_name.clone(),
+            features: FEATURE_POINTER,
         }
         .encode();
         let h = Header { kind: T_WELCOME, device_id: id, nonce: random_bytes() };
@@ -281,6 +282,14 @@ impl Server {
         for &c in missing.iter().filter(|c| is_modifier(**c)).chain(missing.iter().filter(|c| !is_modifier(**c))) {
             s.pressed.insert(c);
             kb.press(c);
+        }
+
+        // Touchpad motion and scroll. Not retransmitted: a lost packet's
+        // motion is simply lost, which is what a real mouse does too.
+        if let Some(p) = input.pointer {
+            if p != Pointer::default() {
+                kb.pointer(p);
+            }
         }
 
         s.server_counter += 1;
