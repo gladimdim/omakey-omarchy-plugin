@@ -98,6 +98,10 @@ impl Config {
             .and_then(|b| serde_json::from_slice(&b).ok())
             .unwrap_or_default()
     }
+
+    pub fn save(&self) -> io::Result<()> {
+        write_private(&config_dir().join("config.json"), &serde_json::to_vec_pretty(self)?)
+    }
 }
 
 #[derive(Serialize, Deserialize)]

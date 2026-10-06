@@ -1,0 +1,12 @@
+#!/bin/bash
+# Copy this checkout over the installed plugin, for development. The shell
+# hot-reloads plugins when files under ~/.config/omarchy/plugins change (it
+# doesn't see edits made through a symlink, hence a copy).
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DEST="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins/gladimdim.omakey"
+[[ -L $DEST ]] && rm "$DEST"
+mkdir -p "$DEST"
+rsync -a --delete --exclude .git --exclude 'omakeyd/target' "$ROOT/" "$DEST/"
+echo "Synced $ROOT -> $DEST"
+echo "First time? Enable it with: omarchy plugin enable gladimdim.omakey --section right"

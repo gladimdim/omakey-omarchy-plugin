@@ -214,7 +214,7 @@ fn state_json(ctx: &Context, running: bool) -> serde_json::Value {
         "version": 1,
         "running": running,
         "pid": std::process::id(),
-        "updated_at": unix_now(),
+        "daemon_version": env!("CARGO_PKG_VERSION"),
         "host_id": hex(&ctx.host_id),
         "host_name": ctx.host_name,
         "port": ctx.port,

@@ -44,17 +44,26 @@ omarchy plugin add https://github.com/gladimdim/omakey-omarchy-plugin --enable
 If the service doesn't start right after installing, log out and back in
 once so the udev rule applies to your session.
 
-## Pair your phone
+## The bar widget
 
-Click the ⌨ icon in the bar → **Pair a phone** (or right-click the icon),
-and scan the code with the Omakey app. From a terminal:
+Click the ⌨ icon in the bar. The panel does everything:
 
-```bash
-omakeyd pair
-```
+- **Set up** — first time, *Set up Omakey* runs `install.sh` in a terminal
+  (it asks for your password there). *Update the service* appears when the
+  installed `omakeyd` is older than the widget.
+- **Pair** — *Pair a phone* shows a QR code for the Omakey app to scan, with
+  a countdown, *Copy link* (for pasting into the app instead) and *Cancel*.
+  Right-clicking the icon starts pairing straight away.
+- **Phones** — who is connected, from which address, how many keys they
+  hold, and when the others were last seen. Rename (✎) or forget (⛓) each
+  one.
+- **Service** — start it, stop it, restart it, or open its logs.
+- **Settings** — the name your phone shows and the UDP port.
 
-The code is good for one phone and 5 minutes. After pairing, the phone
+The QR code is good for one phone and 5 minutes. After pairing, the phone
 finds the desktop by itself (mDNS), even when its IP address changes.
+
+From a terminal: `omakeyd pair`.
 
 ## CLI
 
@@ -65,6 +74,7 @@ omakeyd status [--json]         connection status
 omakeyd devices                 list paired phones
 omakeyd forget <device-id>      unpair a phone
 omakeyd rename <device-id> <n>  rename a phone
+omakeyd config [--name N] [--port P]  show or change settings
 omakeyd run [--dry-run]         the service itself (systemd runs this)
 ```
 
@@ -78,7 +88,8 @@ Logs: `journalctl --user -u omakeyd -f`.
 { "port": 47800, "name": "My desk" }
 ```
 
-Restart with `systemctl --user restart omakeyd` after changing it.
+Or set them from the widget's Settings, or with `omakeyd config`.
+Restart with `systemctl --user restart omakeyd` after editing the file.
 
 ## How it works
 
@@ -112,7 +123,7 @@ phone ──UDP 47800, AES-GCM──▶ omakeyd ──▶ /dev/uinput ──▶ 
 ```bash
 cd omakeyd && cargo test
 cargo run -- run --dry-run --port 47899   # prints keys instead of typing
-scripts/dev-link                          # use this checkout as the plugin
+scripts/dev-sync                          # copy this checkout over the installed plugin
 ```
 
 `omakeyd test-client '<omakey://pair link>' --addr 127.0.0.1 --text "hi"`

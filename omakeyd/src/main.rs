@@ -26,6 +26,8 @@ Usage:
   omakeyd devices                      list paired phones
   omakeyd forget <device-id>           unpair a phone
   omakeyd rename <device-id> <name>    rename a phone
+  omakeyd config [--name NAME] [--port N]
+                                       show or change settings (restart to apply)
   omakeyd test-client <pair-uri> [--addr IP] [--text TEXT]
                                        pair as a fake phone and type TEXT
                                        (types into the focused window!)
@@ -68,6 +70,7 @@ fn main() -> ExitCode {
             Some(uri) => test_client(uri, opt("--addr"), opt("--text").unwrap_or_default()),
             None => Err("usage: omakeyd test-client <pair-uri> [--addr IP] [--text TEXT]".into()),
         },
+        "config" => config(opt("--name"), opt("--port")),
         "test-vectors" => {
             println!("{}", serde_json::to_string_pretty(&vectors::generate()).unwrap());
             Ok(())
@@ -112,6 +115,21 @@ fn pair(wait: bool) -> Result<(), String> {
         }
     }
     Err("the pairing code expired; run omakeyd pair again".into())
+}
+
+fn config(name: Option<String>, port: Option<String>) -> Result<(), String> {
+    let mut c = store::Config::load();
+    if let Some(n) = name {
+        let n: String = n.trim().chars().take(64).collect();
+        c.name = if n.is_empty() { None } else { Some(n) };
+    }
+    if let Some(p) = port {
+        c.port = p.parse::<u16>().ok().filter(|p| *p >= 1024).ok_or("--port needs a number from 1024 to 65535")?;
+    }
+    c.save().map_err(|e| format!("can't save config: {e}"))?;
+    let shown = serde_json::json!({ "name": store::host_name(&c), "custom_name": c.name, "port": c.port });
+    println!("{shown}");
+    Ok(())
 }
 
 fn status(as_json: bool) -> Result<(), String> {
