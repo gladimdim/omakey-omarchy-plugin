@@ -295,7 +295,7 @@
     const cmds = {
       pair: ["omakeyd pair", () => [["Scan this with the Omakey app (one phone, 5 minutes):", "a"]].concat(qrText().map((l) => [l, "q"]))
         .concat([["  Fingerprint K7QD-4M2X · the phone shows the same code", "y"], ["  Waiting for the phone… (Ctrl+C to cancel)", "m"]])],
-      status: ["omakeyd status", () => [["omakeyd 1.0.0 · running · UDP " + S.port + " · Bluetooth " + S.bluetooth, "a"]]
+      status: ["omakeyd status", () => [["omakeyd 1.1.0 · running · UDP " + S.port + " · Bluetooth " + S.bluetooth, "a"]]
         .concat(S.devices.map((d) => ["  " + (d.online ? "● " : "○ ") + d.name.padEnd(16) + (d.online ? (d.transport === "bluetooth" ? "Bluetooth" : "Wi-Fi " + d.addr) + " · ping " + d.ping + " ms" : "last seen " + OMK.ago(d.lastSeen || 0)), d.online ? "" : "m"]))],
       devices: ["omakeyd devices", () => [["ID          NAME             LAST SEEN", "m"]].concat(S.devices.map((d) => [d.id.padEnd(12) + d.name.padEnd(17) + (d.online ? "now" : OMK.ago(d.lastSeen || 0)), ""]))],
       config: ["omakeyd config --name desk", () => [["name: desk · port: " + S.port, ""], ["Restart to apply: systemctl --user restart omakeyd", "m"]]],
