@@ -223,6 +223,7 @@ Sent unencrypted when a HELLO names a device id the server doesn't know
 (forgotten or never paired). Body: `reason 1` (1 = unknown device).
 Because it is not authenticated, the client only shows a "pair again" hint;
 it never deletes its pairing because of a REJECT.
+It also only believes a REJECT from an address it sent HELLO to.
 
 ## Bluetooth
 
@@ -240,10 +241,13 @@ look it up over SDP) at the address from `b` or `bt_address`.
   ("insecure") socket.
 - The stream doesn't lose packets, so the client doesn't resend events. It
   still sends the 100 ms heartbeat, for ping and the 500 ms stuck-key timeout.
-- A phone uses one transport at a time. It tries UDP first and adds
-  Bluetooth when no WELCOME has arrived after about 1.2 s, or when the
-  session in use goes quiet; the first transport to be welcomed is used and
-  the other stops.
+- A phone uses one transport at a time. UDP runs all along; Bluetooth is
+  added when no WELCOME has arrived over UDP after about 1.2 s, or when the
+  session in use goes quiet. The first transport to be welcomed is used.
+  UDP is preferred: a WELCOME over UDP while Bluetooth is in use moves the
+  phone back to UDP and Bluetooth stops. The new session's first INPUT then
+  replaces the old one on the server, keys held across the switch staying
+  down.
 
 On the server:
 
