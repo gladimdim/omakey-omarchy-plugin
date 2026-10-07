@@ -103,6 +103,7 @@
   OMK.initHid($("#hid"));
   OMK.initGallery($("#gallery"));
   OMK.initCli($("#cli-box"));
+  OMK.initPortrait($("#portrait"));
 
   /* ── Touchpad ───────────────────────────────────────────── */
   const padDone = done("#pad-hints");

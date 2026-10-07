@@ -15,18 +15,23 @@
   const CLICKR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="3" width="12" height="18" rx="6"/><path d="M12 3v7M12 10h6"/></svg>';
 
   class Touchpad {
-    /* sink: onMove(dx, dy), onButton(btn, down, mods), onScroll(dy), onTap(btn) */
-    constructor(stage, sink) {
+    /* sink: onMove(dx, dy), onButton(btn, down, mods), onScroll(dy), onTap(btn), onMod(code, down) (compact only)
+       compact: portrait mode's touchpad, with plain Ctrl and Shift keys in place of Ctrl + Left and Shift + Left. */
+    constructor(stage, sink, opts) {
       this.sink = sink;
+      this.compact = !!(opts && opts.compact);
       this.speed = 1.1;
       this.preset = 2;
       const btns = (side) => {
-        const list = [["BTN_LEFT", "Left", CLICK, []], ["BTN_RIGHT", "Right", CLICKR, []], ["BTN_LEFT", "Ctrl + Left", CLICK, ["KEY_LEFTCTRL"]], ["BTN_LEFT", "Shift + Left", CLICK, ["KEY_LEFTSHIFT"]]];
+        const list = this.compact
+          ? [["BTN_LEFT", "Left", CLICK, []], ["BTN_RIGHT", "Right", CLICKR, []], ["KEY_LEFTCTRL", "Ctrl", "<b>⌃</b>", []], ["KEY_LEFTSHIFT", "Shift", "<b>⇧</b>", []]]
+          : [["BTN_LEFT", "Left", CLICK, []], ["BTN_RIGHT", "Right", CLICKR, []], ["BTN_LEFT", "Ctrl + Left", CLICK, ["KEY_LEFTCTRL"]], ["BTN_LEFT", "Shift + Left", CLICK, ["KEY_LEFTSHIFT"]]];
         return '<div class="tp-col ' + side + '">' + list.map((b) =>
-          '<button type="button" data-btn="' + b[0] + '" data-mods="' + b[3].join(",") + '">' + b[2] + "<span>" + b[1] + "</span></button>").join("") + "</div>";
+          '<button type="button" data-' + (b[0].startsWith("KEY_") ? "key" : "btn") + '="' + b[0] + '" data-mods="' + b[3].join(",") + '">' + b[2] + "<span>" + b[1] + "</span></button>").join("") + "</div>";
       };
-      const panel = el("div", "tp-panel",
-        '<div class="tp-main">' + btns("l") + '<div class="tp-pad"><div class="hint">move · tap to click · hold for menu · two fingers scroll<br>scroll wheel works here too</div></div>' + btns("r") + "</div>" +
+      const hint = this.compact ? "move · tap to click<br>two fingers scroll" : "move · tap to click · hold for menu · two fingers scroll<br>scroll wheel works here too";
+      const panel = el("div", "tp-panel" + (this.compact ? " compact" : ""),
+        '<div class="tp-main">' + btns("l") + '<div class="tp-pad"><div class="hint">' + hint + '</div></div>' + btns("r") + "</div>" +
         '<div class="tp-strip"><span>slow</span><input type="range" min="0.3" max="3" step="0.05" aria-label="Pointer speed"><span>fast</span>' +
         '<button type="button" class="tp-chip"></button></div>');
       stage.appendChild(panel);
@@ -35,7 +40,8 @@
       const range = panel.querySelector("input");
       const chip = panel.querySelector(".tp-chip");
       const renderChip = () => {
-        chip.textContent = (this.preset >= 0 ? PRESETS[this.preset][0] : "Custom") + " · " + this.speed.toFixed(2).replace(/0$/, "") + "× ▾";
+        const v = this.speed.toFixed(2).replace(/0$/, "") + "× ▾";
+        chip.textContent = this.compact ? "Speed " + v : (this.preset >= 0 ? PRESETS[this.preset][0] : "Custom") + " · " + v;
         range.value = this.speed;
       };
       range.addEventListener("input", () => { this.speed = +range.value; this.preset = -1; renderChip(); });
@@ -43,8 +49,9 @@
       renderChip();
       panel.querySelectorAll(".tp-col button").forEach((b) => {
         const mods = b.dataset.mods ? b.dataset.mods.split(",") : [];
-        const down = (e) => { e.preventDefault(); b.classList.add("down"); try { b.setPointerCapture(e.pointerId); } catch (_) {} this.sink.onButton(b.dataset.btn, true, mods); };
-        const up = () => { if (!b.classList.contains("down")) return; b.classList.remove("down"); this.sink.onButton(b.dataset.btn, false, mods); };
+        const send = (down) => b.dataset.key ? this.sink.onMod && this.sink.onMod(b.dataset.key, down) : this.sink.onButton(b.dataset.btn, down, mods);
+        const down = (e) => { e.preventDefault(); b.classList.add("down"); try { b.setPointerCapture(e.pointerId); } catch (_) {} send(true); };
+        const up = () => { if (!b.classList.contains("down")) return; b.classList.remove("down"); send(false); };
         b.addEventListener("pointerdown", down);
         b.addEventListener("pointerup", up);
         b.addEventListener("pointercancel", up);
@@ -234,6 +241,7 @@
       else if (w.type === "log") this.makeLog(w);
       else if (w.type === "files") this.makeFiles(w);
       else if (w.type === "doc") this.makeDoc(w);
+      else if (w.type === "chat") this.makeChat(w);
       node.addEventListener("pointerdown", () => this.focus(w));
       this.work.appendChild(node);
       this.wins.push(w);
@@ -394,6 +402,48 @@
       w.scroll = 0;
     }
 
+    /* A chat: what's typed goes in the message box, Enter sends it. */
+    makeChat(w) {
+      w.node.innerHTML = '<div class="dt-wtitle">' + esc(w.title || "Messages") + '</div><div class="dt-chat"><div class="msgs"></div><div class="in"><span class="tx"></span></div></div>';
+      w.msgs = w.node.querySelector(".msgs");
+      w.inp = w.node.querySelector(".in .tx");
+      w.line = ""; w.cur = 0;
+      (w.intro || []).forEach((m) => this.chatMsg(w, m[0], m[1]));
+      this.renderChat(w);
+    }
+    chatMsg(w, who, text) {
+      const m = el("div", "msg " + who, esc(text));
+      w.msgs.appendChild(m);
+      while (w.msgs.children.length > 14) w.msgs.firstChild.remove();
+    }
+    renderChat(w) {
+      const before = esc(w.line.slice(0, w.cur)), at = w.line[w.cur], after = esc(w.line.slice(w.cur + 1));
+      const cursor = at ? '<span class="sel">' + esc(at) + "</span>" : '<span class="dt-cursor"></span>';
+      w.inp.innerHTML = w.line ? before + cursor + after : cursor + '<span class="ph">Message</span>';
+    }
+    chatKey(w, code, ch) {
+      if (this.has("CTRL")) {
+        if (code === "KEY_BACKSPACE") { const s = w.line.slice(0, w.cur).replace(/\S+\s*$/, ""); w.line = s + w.line.slice(w.cur); w.cur = s.length; }
+        else if (code === "KEY_U") { w.line = w.line.slice(w.cur); w.cur = 0; }
+        else return;
+      } else if (code === "KEY_ENTER" || code === "KEY_KPENTER") {
+        const text = w.line.trim();
+        w.line = ""; w.cur = 0;
+        if (text) {
+          this.chatMsg(w, "me", text);
+          this.o.onAction("send");
+          if (w.reply) setTimeout(() => { const r = w.reply(text); if (r) this.chatMsg(w, "them", r); }, 900);
+        }
+      } else if (code === "KEY_BACKSPACE") { if (w.cur > 0) { w.line = w.line.slice(0, w.cur - 1) + w.line.slice(w.cur); w.cur--; } }
+      else if (code === "KEY_DELETE") { w.line = w.line.slice(0, w.cur) + w.line.slice(w.cur + 1); }
+      else if (code === "KEY_LEFT") w.cur = Math.max(0, w.cur - 1);
+      else if (code === "KEY_RIGHT") w.cur = Math.min(w.line.length, w.cur + 1);
+      else if (code === "KEY_HOME" || code === "KEY_UP") w.cur = 0;
+      else if (code === "KEY_END" || code === "KEY_DOWN") w.cur = w.line.length;
+      else if (ch) { w.line = w.line.slice(0, w.cur) + ch + w.line.slice(w.cur); w.cur += ch.length; this.o.onAction("type"); }
+      this.renderChat(w);
+    }
+
     /* ── keys ── */
     has(mod) { return this.held.has("KEY_LEFT" + mod) || this.held.has("KEY_RIGHT" + mod); }
 
@@ -425,8 +475,10 @@
       if (code === "KEY_SYSRQ") return this.toast("Screenshot saved", "~/Pictures/screenshot.png");
       if (this.menu) return this.menuKey(code);
       const w = this.focused;
-      if (!w || w.type !== "term") return;
-      const ch = alt ? null : OMK.charFor(code, shift, this.caps, this.kl);
+      if (!w || (w.type !== "term" && w.type !== "chat")) return;
+      // devKl: the layout of Omakey's own keyboard device, when a phone asked for one (portrait mode).
+      const ch = alt ? null : OMK.charFor(code, shift, this.caps, this.devKl || this.kl);
+      if (w.type === "chat") return this.chatKey(w, code, ch);
       this.termKey(w, code, ch);
     }
 
@@ -487,7 +539,7 @@
       }
       if (code === "KEY_BACKSPACE") this.lock.pw = this.lock.pw.slice(0, -1);
       else if (code === "KEY_ESC") this.lock.pw = "";
-      else { const ch = OMK.charFor(code, this.has("SHIFT"), this.caps, this.kl); if (ch) this.lock.pw += ch; }
+      else { const ch = OMK.charFor(code, this.has("SHIFT"), this.caps, this.devKl || this.kl); if (ch) this.lock.pw += ch; }
       pw.innerHTML = this.lock.pw ? Array.from(this.lock.pw).map(() => "<i></i>").join("") : "<span>Password</span>";
     }
 

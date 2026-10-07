@@ -28,6 +28,7 @@
 <script src="assets/desktop.js" defer></script>
 <script src="assets/widget.js" defer></script>
 <script src="assets/demos.js" defer></script>
+<script src="assets/portrait.js" defer></script>
 <script src="assets/main.js" defer></script>
 </head>
 <body>
@@ -38,6 +39,7 @@
     <nav class="nav-links" aria-label="Sections">
       <a href="#real">Keyboard</a>
       <a href="#touchpad">Touchpad</a>
+      <a href="#portrait">Portrait</a>
       <a href="#widget">Widget</a>
       <a href="#bluetooth">Bluetooth</a>
       <a href="#layouts">Layouts</a>
@@ -174,6 +176,47 @@
         <div id="pad-phone" style="margin:14px auto 0;max-width:620px"></div>
         <p class="caption">Drag on the pad to move the pointer. The speed chip cycles the presets: Laptop, 1080p, 1440p, ultrawide, 4K.</p>
       </div>
+    </div>
+  </section>
+
+  <section class="feature wide reveal-up" id="portrait">
+    <div class="wrap">
+      <div class="copy">
+        <p class="eyebrow">Portrait mode <span class="new">Coming in the next release</span></p>
+        <h2>Hold it upright. Type with your own keyboard.</h2>
+        <p>Choose <strong>Portrait</strong> under Layout and the phone stands up: the touchpad on top, <strong>your Android keyboard</strong> below. Gboard, SwiftKey, Samsung Keyboard, whichever one you use.</p>
+        <p>Suggestions, autocorrect and swipe typing reach the computer as real key presses: Omakey sends each change the keyboard makes to its text, so <strong>an autocorrection arrives as ⌫⌫ and the new letters</strong>.</p>
+      </div>
+      <div class="media">
+        <div class="chips" id="pt-hints" style="margin:0 0 12px;justify-content:center">
+          <span data-step="send">Type a reply, press ⏎</span><span data-step="fix">Tap a suggestion</span><span data-step="swipe">Swipe across the letters</span><span data-step="lang">🌐 Switch to Українська</span><span data-step="strip">Swipe the key strip</span><span data-step="super">Super on the strip, then Space</span>
+        </div>
+        <div class="pt-row">
+          <div class="pt-main">
+            <div class="pt-desktop"></div>
+            <div class="packet-log pt-log" aria-live="off"></div>
+            <div class="toolbar pt-tools">
+              <span class="lbl">Watch</span>
+              <button type="button" class="ghost" data-demo="autocorrect">Autocorrect</button>
+              <button type="button" class="ghost" data-demo="swipe">Swipe typing</button>
+              <button type="button" class="ghost" data-demo="ukrainian">Українська</button>
+              <button type="button" class="ghost" data-demo="super">Super + Space</button>
+            </div>
+            <div class="toolbar pt-tools">
+              <span class="lbl">Your keyboard</span>
+              <div class="seg pt-look"><button type="button" aria-pressed="true" data-look="light">Light</button><button type="button" aria-pressed="false" data-look="dark">Dark</button><button type="button" aria-pressed="false" data-look="you">Material You</button></div>
+            </div>
+          </div>
+          <div class="pt-phone"></div>
+        </div>
+        <p class="caption">A stand-in for your phone's keyboard: in the app it's the real one, whatever you have installed. Strokes are slowed down 4× here so you can watch an autocorrection arrive. The strip above the keyboard swipes sideways: digits, F1–F12, Esc, Tab and arrows, then Super, Ctrl, Alt, Print Screen and media keys.</p>
+      </div>
+      <ul class="pt-points">
+        <li><b>The keys phones lack</b>Digits, F1–F12, Esc, Tab, Home, End and arrows, Super, Ctrl, Alt, PrtSc and media keys, in a strip you swipe sideways.</li>
+        <li><b>Shortcuts with your keyboard</b>Tap Super or Ctrl on the strip or the touchpad, then a key. It stays down for one key; tap it again to let go.</li>
+        <li><b>Ukrainian and English</b>Each letter goes with the layout that types it. On Omarchy, omakeyd switches only Omakey's own keyboard device, so your laptop keyboard keeps its layout.</li>
+        <li><b>Nothing learned</b>Omakey asks your keyboard not to learn what you type here, because it may be a password for the computer.</li>
+      </ul>
     </div>
   </section>
 
