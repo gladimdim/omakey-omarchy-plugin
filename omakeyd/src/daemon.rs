@@ -8,6 +8,8 @@ use crate::notify::Notifier;
 use crate::protocol::{fingerprint, random_bytes, DeviceId, MAX_DATAGRAM};
 use crate::server::{BtStatus, Pending, Server, SessionInfo, Shared, PAIRING_TTL};
 use crate::store::{self, hex, unix_now, Config, Device, Devices};
+use crate::theme::ThemeWatch;
+use crate::hypr::KeyboardLayout;
 use serde_json::json;
 use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::net::{IpAddr, Ipv4Addr};
@@ -93,6 +95,10 @@ pub fn run(port_override: Option<u16>, dry_run: bool) -> Result<(), String> {
     // Shared with the Bluetooth connection threads; the UDP loop below holds
     // it only while handling one packet.
     let server = Arc::new(Mutex::new(Server::new(shared.clone(), Keyboard::new(sink), host_name.clone())));
+    // A real keyboard only: a dry run has no device for Hyprland to switch.
+    if !dry_run {
+        server.lock().unwrap().layout = Some(KeyboardLayout::new());
+    }
     let bluetooth = bluetooth::start(server.clone(), shared.clone());
     let ctx = Arc::new(Context {
         shared: shared.clone(),
@@ -142,6 +148,7 @@ pub fn run(port_override: Option<u16>, dry_run: bool) -> Result<(), String> {
     let mut buf = [0u8; MAX_DATAGRAM + 1];
     let mut last_tick = Instant::now();
     let mut last_publish = Instant::now() - Duration::from_secs(10);
+    let mut theme_watch = ThemeWatch::new();
 
     while !STOP.load(Ordering::SeqCst) {
         match socket.recv(&mut buf) {
@@ -172,6 +179,9 @@ pub fn run(port_override: Option<u16>, dry_run: bool) -> Result<(), String> {
             if now.duration_since(last_tick) >= Duration::from_millis(50) {
                 srv.tick(now);
                 last_tick = now;
+            }
+            if let Some(theme) = theme_watch.poll(now) {
+                srv.set_theme(theme);
             }
             let due = dirty || srv.changed || now.duration_since(last_publish) >= Duration::from_secs(1);
             let sessions = due.then(|| {

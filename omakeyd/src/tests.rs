@@ -391,6 +391,30 @@ fn switching_transport_does_not_flicker_held_keys() {
 }
 
 #[test]
+fn first_acks_carry_the_desktop_theme() {
+    let mut r = Rig::new();
+    r.connect();
+    *r.rec.2.lock().unwrap() = Some(0);
+    let theme = crate::theme::Theme::parse("nord", "background = \"#2e3440\"\nforeground = \"#eceff4\"").unwrap();
+    r.server.set_theme(Some(theme.encode()));
+    let mut themed = 0;
+    for i in 0..8 {
+        match r.key(A, i % 2 == 0, 10 + i * 10) {
+            Some(Reply::Ack { theme: Some(t), .. }) => {
+                assert_eq!(t, theme);
+                themed += 1;
+            }
+            Some(Reply::Ack { theme: None, .. }) => {}
+            _ => panic!("no ACK"),
+        }
+    }
+    assert_eq!(themed, 4);
+    // A new theme goes out again.
+    r.server.set_theme(Some(theme.encode()));
+    assert!(matches!(r.key(A, true, 200), Some(Reply::Ack { theme: Some(_), .. })));
+}
+
+#[test]
 fn ack_carries_the_lock_leds() {
     let mut r = Rig::new();
     r.connect();
@@ -439,3 +463,22 @@ fn loss_is_estimated_from_counter_gaps() {
     // 19 counters seen through the last delivered one, 4 of them lost.
     assert!((infos[0].loss - 4.0 * 100.0 / 19.0).abs() < 0.01, "{}", infos[0].loss);
 }
+
+#[test]
+fn input_layout_round_trips_after_the_pointer() {
+    let with = Input { client_time_ms: 7, held: vec![30], layout: Some("ua".into()), ..Default::default() };
+    let enc = with.encode();
+    let back = Input::decode(&enc).unwrap();
+    assert_eq!(back.layout.as_deref(), Some("ua"));
+    // The pointer went as zeros to make room for it.
+    assert_eq!(back.pointer, Some(Pointer { dx: 0, dy: 0, wheel: 0, hwheel: 0 }));
+    // Without one, the packet is as before.
+    let without = Input { client_time_ms: 7, held: vec![30], ..Default::default() };
+    assert_eq!(Input::decode(&without.encode()).unwrap().layout, None);
+    // Junk isn't taken as a layout name.
+    let mut bad = enc.clone();
+    let n = bad.len();
+    bad[n - 1] = b'/';
+    assert_eq!(Input::decode(&bad).unwrap().layout, None);
+}
+

@@ -1,6 +1,7 @@
 mod bluetooth;
 mod client;
 mod daemon;
+mod hypr;
 mod keyboard;
 mod net;
 mod notify;
@@ -8,6 +9,7 @@ mod protocol;
 mod qr;
 mod server;
 mod store;
+mod theme;
 mod vectors;
 
 #[cfg(test)]

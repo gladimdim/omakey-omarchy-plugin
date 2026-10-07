@@ -253,6 +253,8 @@ pub struct Pointer {
 }
 
 pub const POINTER_LEN: u8 = 8;
+/// Longest INPUT `layout` name taken.
+pub const MAX_LAYOUT: usize = 16;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Input {
@@ -262,6 +264,8 @@ pub struct Input {
     pub events: Vec<Event>,
     /// Optional trailer; absent in packets from clients without a touchpad.
     pub pointer: Option<Pointer>,
+    /// Optional, after the pointer: the xkb layout the keys are meant in.
+    pub layout: Option<String>,
 }
 
 impl Input {
@@ -279,11 +283,17 @@ impl Input {
             out.extend_from_slice(&e.code.to_be_bytes());
             out.push(e.down as u8);
         }
-        if let Some(p) = self.pointer {
+        // The layout follows the pointer, which goes as zeros when it has nothing.
+        if self.pointer.is_some() || self.layout.is_some() {
+            let p = self.pointer.unwrap_or(Pointer { dx: 0, dy: 0, wheel: 0, hwheel: 0 });
             out.push(POINTER_LEN);
             for v in [p.dx, p.dy, p.wheel, p.hwheel] {
                 out.extend_from_slice(&v.to_be_bytes());
             }
+        }
+        if let Some(l) = &self.layout {
+            out.push(l.len() as u8);
+            out.extend_from_slice(l.as_bytes());
         }
         out
     }
@@ -321,7 +331,16 @@ impl Input {
         } else {
             None
         };
-        Some(Input { client_time_ms, flags, held, events, pointer })
+        // Then the layout: a length and an xkb name ("us", "ua").
+        let layout = if r.remaining() > 0 {
+            let n = r.u8()? as usize;
+            let name = r.take(n)?;
+            (n <= MAX_LAYOUT && name.iter().all(|b| b.is_ascii_alphanumeric() || b"_-()".contains(b)))
+                .then(|| String::from_utf8_lossy(name).into_owned())
+        } else {
+            None
+        };
+        Some(Input { client_time_ms, flags, held, events, pointer, layout })
     }
 }
 
@@ -416,6 +435,7 @@ mod tests {
                 Event { eseq: 0, code: 57, down: true },
             ],
             pointer: None,
+            layout: None,
         };
         assert_eq!(Input::decode(&i.encode()).unwrap(), i);
         assert!(Input::decode(&i.encode()[..9]).is_none());

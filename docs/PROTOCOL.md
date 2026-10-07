@@ -164,6 +164,26 @@ wheel            2    signed vertical scroll in 1/120 of a notch; positive scrol
 hwheel           2    signed horizontal scroll in 1/120 of a notch; positive scrolls right
 ```
 
+Optional layout trailer, after the pointer (a client sending it sends the
+pointer too, as zeros when there's no motion):
+
+```
+layout_len       1    at most 16
+layout           layout_len   ASCII xkb layout name: "us", "ua"
+```
+
+The layout the keys in this INPUT are meant in. A client typing with the
+phone's own keyboard picks, for each character, a layout that has it, and
+before a different one waits until every event so far is acknowledged, so
+no key is read with the wrong layout. The server switches its own keyboard
+device (only that one: the desktop's keyboards keep their layouts) to that
+layout before applying the events, if it is one of the device's configured
+layouts; otherwise it leaves it and logs once. While keys arrive it looks
+again about every second, as a layout toggle on the desktop can move the
+device too. An INPUT with events and no `layout` puts the device back on
+the layout it had before a client first asked. On Omarchy this is
+Hyprland's `switchxkblayout omakey-keyboard <index>`.
+
 Motion and scroll since the previous INPUT, sent once and never repeated:
 a lost packet loses that bit of motion, as a mouse would. Touchpad buttons
 are not here: `BTN_LEFT` (0x110), `BTN_RIGHT` (0x111) and `BTN_MIDDLE`
@@ -202,7 +222,30 @@ client_time_ms   4    echoed from the INPUT being acknowledged
 last_eseq        2    newest event applied
 leds             1    optional; lock LEDs of the virtual keyboard:
                       bit 0 = Num Lock, bit 1 = Caps Lock, bit 2 = Scroll Lock
+theme_len        1    optional, only after leds; bytes of theme that follow
+theme            theme_len
 ```
+
+`theme` is the desktop's Omarchy theme, for phones that colour themselves
+to match:
+
+```
+mode             1    0 = dark, 1 = light
+name_len         1
+name             name_len   UTF-8, the theme's id ("tokyo-night"), at most 32 bytes
+count            1    colours that follow
+colors           3 × count  RGB, in this order: background, lighter_background,
+                      dark_background, foreground, muted, accent, selection,
+                      red, yellow, green, cyan, blue, magenta, orange
+```
+
+The colours are the keys of Omarchy's `colors.toml`; one a theme lacks is
+filled from a close one (lighter_background from background, muted from
+foreground). The server reads `~/.local/state/omarchy/current/` and puts
+`theme` in the first 4 ACKs of a session, and in the next 4 after the
+desktop's theme changes; it looks every 2 s. Without Omarchy, or without
+`leds`, there is no `theme`. A client takes the first `count` colours it
+knows and ignores the rest.
 
 The client drops events up to `last_eseq` from its resend queue and shows
 `now - client_time_ms` as the ping.

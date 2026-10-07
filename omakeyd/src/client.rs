@@ -4,6 +4,7 @@
 
 use crate::protocol::*;
 use crate::store::{hex, unb64_key, unhex};
+use crate::theme::Theme;
 use aes_gcm::Aes256Gcm;
 use std::collections::{BTreeSet, VecDeque};
 
@@ -99,7 +100,7 @@ impl PairInfo {
 #[allow(dead_code)] // fields are part of the API the tests use
 pub enum Reply {
     Welcome { host_name: String },
-    Ack { client_time_ms: u32, last_eseq: u16, leds: Option<u8> },
+    Ack { client_time_ms: u32, last_eseq: u16, leds: Option<u8>, theme: Option<Theme> },
     Reject(u8),
 }
 
@@ -185,12 +186,15 @@ impl Client {
                 if sid != live.session_id || counter <= live.max_server_counter {
                     return None;
                 }
-                let ack = Ack::decode(&open(&live.s2c, pkt)?)?;
+                let plain = open(&live.s2c, pkt)?;
+                let ack = Ack::decode(&plain)?;
+                // The desktop theme, when it follows `leds`.
+                let theme = plain.get(7..).and_then(Theme::decode);
                 live.max_server_counter = counter;
                 while self.unacked.front().is_some_and(|e| !eseq_newer(e.eseq, ack.last_eseq)) {
                     self.unacked.pop_front();
                 }
-                Some(Reply::Ack { client_time_ms: ack.client_time_ms, last_eseq: ack.last_eseq, leds: ack.leds })
+                Some(Reply::Ack { client_time_ms: ack.client_time_ms, last_eseq: ack.last_eseq, leds: ack.leds, theme })
             }
             _ => None,
         }
@@ -230,6 +234,7 @@ impl Client {
             held: self.held.iter().copied().collect(),
             events: self.unacked.iter().copied().collect(),
             pointer: self.pending_pointer.take(),
+            layout: None,
         }
         .encode();
         let h = Header { kind: T_INPUT, device_id: self.device_id, nonce: session_nonce(live.session_id, self.counter) };

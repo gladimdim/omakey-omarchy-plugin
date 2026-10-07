@@ -1,6 +1,7 @@
 //! Session state machine. No sockets here: `handle` takes a datagram and
 //! returns the reply, so the whole protocol is unit-testable.
 
+use crate::hypr::KeyboardLayout;
 use crate::keyboard::{allowed, is_modifier, Keyboard};
 use crate::protocol::*;
 use crate::store::{hex, unix_now, Device, Devices};
@@ -20,6 +21,8 @@ pub const PAIRING_TTL: Duration = Duration::from_secs(300);
 /// HELLO can only push out these, never the session the phone is using.
 const MAX_PENDING_PER_DEVICE: usize = 2;
 const MAX_HELD: usize = 64;
+/// ACKs per session that carry the desktop theme; one is enough, the rest cover loss.
+const THEME_REPEATS: u8 = 4;
 /// HELLOs per source IP: a token bucket of this rate and burst.
 const HELLO_RATE: f32 = 10.0;
 const HELLO_BURST: f32 = 20.0;
@@ -164,6 +167,9 @@ struct Session {
     established: bool,
     packets: u64,
     loss: LossMeter,
+    /// ACKs that still carry the desktop theme: the first few of a
+    /// session, and again after the theme changes.
+    theme_left: u8,
 }
 
 pub const LOSS_WINDOW: usize = 256;
@@ -248,6 +254,11 @@ pub struct Server {
     /// Devices whose session just ended, for their last_seen.
     seen: Vec<DeviceId>,
     hello_limit: RateLimiter,
+    /// The desktop theme as an ACK trailer (PROTOCOL.md, ACK `theme`), if any.
+    theme: Option<Vec<u8>>,
+    /// Switches the keyboard's layout when a phone asks (INPUT `layout`);
+    /// None in tests and where there's no Hyprland to ask.
+    pub layout: Option<KeyboardLayout>,
 }
 
 impl Server {
@@ -261,6 +272,16 @@ impl Server {
             changed: true,
             seen: Vec::new(),
             hello_limit: RateLimiter::default(),
+            theme: None,
+            layout: None,
+        }
+    }
+
+    /// The desktop theme changed: every session hears about it again.
+    pub fn set_theme(&mut self, theme: Option<Vec<u8>>) {
+        self.theme = theme;
+        for s in self.sessions.values_mut() {
+            s.theme_left = THEME_REPEATS;
         }
     }
 
@@ -375,6 +396,7 @@ impl Server {
                 established: false,
                 packets: 0,
                 loss: LossMeter::default(),
+                theme_left: THEME_REPEATS,
             },
         );
         Some(reply)
@@ -431,6 +453,10 @@ impl Server {
         };
         // The new session's keys go down before an older session's come up,
         // so a key held across a Wi-Fi/Bluetooth switch never flickers.
+        // The layout first, so this packet's keys are read with it.
+        if let Some(l) = self.layout.as_mut() {
+            l.apply(input.layout.as_deref(), !input.events.is_empty(), now);
+        }
         self.apply(sid, &input);
         if first {
             // The phone now uses this session; older ones of the device go.
@@ -451,7 +477,14 @@ impl Server {
         let s = self.sessions.get_mut(&sid).unwrap();
         s.server_counter += 1;
         let h = Header { kind: T_ACK, device_id: s.device_id, nonce: session_nonce(sid, s.server_counter) };
-        let ack = Ack { client_time_ms: input.client_time_ms, last_eseq: s.last_eseq, leds }.encode();
+        let mut ack = Ack { client_time_ms: input.client_time_ms, last_eseq: s.last_eseq, leds }.encode();
+        // The theme follows `leds`, so it can only go when that does.
+        if let (Some(_), Some(theme)) = (leds, &self.theme) {
+            if s.theme_left > 0 {
+                s.theme_left -= 1;
+                ack.extend_from_slice(theme);
+            }
+        }
         Some(seal(&s.s2c, &h, &ack))
     }
 
