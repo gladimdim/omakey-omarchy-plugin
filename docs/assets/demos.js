@@ -93,11 +93,20 @@
     const fly = (cls, text, fromLeft, lost, onArrive) => {
       const p = el("div", "wire-pkt " + cls, text);
       air.appendChild(p);
-      const W = air.clientWidth, inset = window.matchMedia("(max-width: 600px)").matches ? 130 : 175;
-      const span = W - inset * 2 - p.offsetWidth;
-      const a = fromLeft ? 0 : span, b = fromLeft ? span : 0;
+      // Phones stack the nodes (phone on top), so packets fly down instead of across.
+      const vertical = window.matchMedia("(max-width: 600px)").matches;
+      let a, b;
+      if (vertical) {
+        const nl = $(".wire-node.l", root), nr = $(".wire-node.r", root);
+        const top = nl.offsetTop + nl.offsetHeight + 6, bottom = nr.offsetTop - 6 - p.offsetHeight;
+        a = fromLeft ? top : bottom; b = fromLeft ? bottom : top;
+      } else {
+        const span = air.clientWidth - 175 * 2 - p.offsetWidth;
+        a = fromLeft ? 0 : span; b = fromLeft ? span : 0;
+      }
+      const at = (v) => vertical ? "translate(-50%," + v + "px)" : "translate(" + v + "px,-50%)";
       const dur = (reduced() ? 300 : 1100);
-      const anim = p.animate([{ transform: "translate(" + a + "px,-50%)" }, { transform: "translate(" + (lost ? (a + b) / 2 : b) + "px,-50%)" }], { duration: lost ? dur / 2 : dur, easing: "linear", fill: "forwards" });
+      const anim = p.animate([{ transform: at(a) }, { transform: at(lost ? (a + b) / 2 : b) }], { duration: lost ? dur / 2 : dur, easing: "linear", fill: "forwards" });
       anim.onfinish = () => {
         if (lost) { p.textContent = "✕ lost"; p.classList.add("lost"); setTimeout(() => (p.style.opacity = 0), 200); setTimeout(() => p.remove(), 700); return; }
         p.remove(); onArrive && onArrive();

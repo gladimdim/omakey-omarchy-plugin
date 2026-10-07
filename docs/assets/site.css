@@ -134,7 +134,7 @@ section.feature { padding: 110px 0 0; }
 .feature.wide .copy { max-width: 760px; margin: 0 auto; text-align: center; }
 @media (max-width: 920px) {
   section.feature { padding-top: 76px; }
-  .feature .wrap, .feature.flip .wrap { grid-template-columns: 1fr; gap: 24px; }
+  .feature .wrap, .feature.flip .wrap { grid-template-columns: minmax(0, 1fr); gap: 24px; }
   .feature.flip .copy { order: 0; }
 }
 .eyebrow, .copy p.eyebrow { font: 700 12.5px/1 var(--sans); letter-spacing: .16em; text-transform: uppercase; color: var(--teal); margin: 0 0 14px; }
@@ -191,10 +191,10 @@ section.center > .wrap > p.sub { color: var(--muted); font-size: 18px; margin: 0
 .facts .ic svg { width: 20px; height: 20px; }
 .facts h3 { margin: 0 0 6px; font-size: 18px; letter-spacing: -.01em; }
 .facts p { margin: 0; color: var(--muted); font-size: 15.5px; }
-@media (max-width: 860px) { .facts { grid-template-columns: 1fr; } }
+@media (max-width: 860px) { .facts { grid-template-columns: minmax(0, 1fr); } }
 
 .get { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; text-align: left; max-width: 1040px; margin: 0 auto; }
-@media (max-width: 860px) { .get { grid-template-columns: 1fr; } }
+@media (max-width: 860px) { .get { grid-template-columns: minmax(0, 1fr); } }
 .get > div { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 28px; display: flex; flex-direction: column; }
 .get h3 { margin: 0 0 4px; font-size: 22px; display: flex; align-items: center; gap: 10px; }
 .get h3 .ver { font: 600 12px/1 var(--mono); color: #05211d; background: var(--grad); padding: 4px 8px; border-radius: 999px; }
@@ -514,7 +514,7 @@ footer a { color: var(--muted); }
 .wg-foot { margin-top: 14px; font-size: 11.5px; color: color-mix(in srgb, var(--t-fg) 45%, transparent); display: flex; justify-content: space-between; gap: 8px; }
 
 .pair-row { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 18px; align-items: center; }
-@media (max-width: 720px) { .pair-row { grid-template-columns: 1fr; } .pair-row .phone { max-width: 260px; margin: 0 auto; } }
+@media (max-width: 720px) { .pair-row { grid-template-columns: minmax(0, 1fr); } .pair-row .phone { width: 100%; max-width: 260px; margin: 0 auto; } }
 .swatches { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
 .swatches button {
   display: inline-flex; align-items: center; gap: 8px; font: 600 13.5px/1 var(--sans); color: var(--text);
@@ -569,10 +569,10 @@ footer a { color: var(--muted); }
 .budget div { display: grid; grid-template-columns: 170px minmax(0, 1fr) 70px; gap: 10px; align-items: center; font-size: 13px; color: var(--muted); }
 .budget i { height: 8px; border-radius: 4px; background: var(--grad); display: block; }
 .budget code { color: var(--text); font-size: 12px; text-align: right; }
-@media (max-width: 600px) { .budget div { grid-template-columns: 120px minmax(0, 1fr) 60px; } .wire-node { width: 112px; } .wire-air, .wire-pkt { left: 130px; } .wire-air { right: 130px; } }
+@media (max-width: 600px) { .budget div { grid-template-columns: 120px minmax(0, 1fr) 60px; } }
 
 .bt-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; text-align: left; }
-@media (max-width: 860px) { .bt-grid { grid-template-columns: 1fr; } }
+@media (max-width: 860px) { .bt-grid { grid-template-columns: minmax(0, 1fr); } }
 .bt-card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; }
 .bt-card h3 { margin: 0 0 6px; font-size: 20px; letter-spacing: -.01em; }
 .bt-card > p { color: var(--muted); margin: 0 0 16px; font-size: 15.5px; }
@@ -619,7 +619,7 @@ footer a { color: var(--muted); }
 }
 .studio-card h3 { margin: 0 0 6px; font-size: 20px; }
 .studio-card p { margin: 0; color: var(--muted); font-size: 15px; }
-@media (max-width: 700px) { .studio-card { grid-template-columns: 1fr; } }
+@media (max-width: 700px) { .studio-card { grid-template-columns: minmax(0, 1fr); } }
 
 /* CLI */
 .cli { border-radius: 12px; overflow: hidden; background: #03080c; border: 1px solid var(--border); }
@@ -638,3 +638,70 @@ footer a { color: var(--muted); }
 
 /* Real-code mini screen (lock screen / layouts) */
 .mini-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+
+/* ═════════════════════════════════════════════════════════════
+   Phones: tighter spacing, one-row hint strips, narrower demos.
+   ═════════════════════════════════════════════════════════════ */
+@media (max-width: 600px) {
+  .hero { padding-top: 36px; }
+  .hero .badge { font-size: 12.5px; }
+  .hero .cta .btn { width: 100%; justify-content: center; }
+  .platforms { font-size: 13px; }
+  .demo-frame { margin-top: 28px; }
+
+  /* Hint chips scroll sideways instead of stacking seven rows high. */
+  .try-hints, #pad-hints, #pair-hints {
+    flex-wrap: nowrap; justify-content: flex-start !important; overflow-x: auto; scrollbar-width: none;
+    margin-left: -16px; margin-right: -16px; padding: 0 16px; scroll-padding: 0 16px;
+  }
+  #pair-hints { margin-left: -8px; margin-right: -8px; padding: 0 8px; }
+  .try-hints::-webkit-scrollbar, #pad-hints::-webkit-scrollbar, #pair-hints::-webkit-scrollbar { display: none; }
+  .try-hints span, #pad-hints span, #pair-hints span { flex: none; white-space: nowrap; }
+
+  section.feature { padding-top: 64px; }
+  section.center { padding-top: 72px; }
+  section.center > .wrap > p.sub, .copy p { font-size: 16.5px; }
+  .media { padding: 8px; border-radius: 14px; }
+  .caption { margin: 8px 4px 2px; }
+  .toolbar { gap: 8px; }
+  .toolbar .lbl { width: 100%; }
+
+  .tl-row { grid-template-columns: 104px minmax(0, 1fr); gap: 10px; font-size: 13px; }
+  .holdpad { height: 110px; padding: 0 16px; text-align: center; }
+
+  /* The wire stands up: phone on top, omakeyd below (demos.js flies packets down). */
+  .wire { height: 340px; }
+  .wire-node { left: 50%; right: auto; top: auto; transform: translateX(-50%); width: min(250px, 82%); padding: 10px 12px; }
+  .wire-node.l { left: 50%; top: 12px; }
+  .wire-node.r { left: 50%; right: auto; bottom: 12px; }
+  .wire-node .set { min-height: 0; }
+  .wire-air { left: 50%; right: auto; top: 12px; bottom: 12px; width: 2px; height: auto; margin-left: -1px; background: repeating-linear-gradient(180deg, #2a4a5c 0 8px, transparent 8px 16px); }
+  .wire-pkt { left: 50%; top: 0; transform: translate(-50%, 0); max-width: 220px; }
+  .wire-ctl input[type=range] { width: 96px; }
+
+  .bt-card, .facts > div { padding: 18px; }
+  .bt-sim .end { width: 60px; font-size: 11px; }
+  .bt-sim .end svg { width: 32px; height: 32px; }
+  .bt-sim .end.l { left: 4px; }
+  .bt-sim .end.r { right: 4px; }
+  .bt-sim .path { left: 66px; right: 66px; font-size: 10px; }
+  .bt-sim .path span { white-space: nowrap; padding: 3px 7px; }
+  .devices { gap: 6px; }
+  .devices button { padding: 10px 4px; }
+
+  /* Fact cards: icon beside the heading. */
+  .facts > div { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 14px; align-items: center; }
+  .facts .ic { margin-bottom: 0; }
+  .facts p { grid-column: 1 / -1; margin-top: 10px; }
+  .facts h3 { margin: 0; }
+
+  .studio-card { padding: 18px; }
+  .studio-card .btn { justify-content: center; }
+  .get > div { padding: 20px; }
+  .get .btn.primary { align-self: stretch !important; justify-content: center; }
+  .cmd { padding: 10px 10px 10px 12px; }
+  .cmd code { font-size: 12.5px; }
+
+  footer { margin-top: 80px; padding: 28px 0 40px; }
+  footer nav { margin-left: 0; gap: 12px 18px; }
+}
