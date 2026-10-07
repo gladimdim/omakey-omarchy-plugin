@@ -1,6 +1,6 @@
 [package]
 name = "omakeyd"
-version = "0.4.0"
+version = "1.0.0"
 edition = "2021"
 description = "Omakey daemon: turns a paired phone into a real keyboard on Omarchy"
 license = "MIT"
