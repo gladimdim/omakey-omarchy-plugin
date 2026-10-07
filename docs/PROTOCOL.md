@@ -53,6 +53,13 @@ The link *is* that phone's credential: whoever has it can connect as that
 phone until it is forgotten on the desktop. The QR code is only ever shown
 on the desktop's screen.
 
+Both screens show a **fingerprint** of the link so the user can check the
+phone scanned this desktop's code: the first 4 bytes of SHA-256(`K`) as 8
+uppercase hex digits in two groups, e.g. `7D75-B04F`.
+
+While a pairing window has more than 60 s left, asking for a code again
+(`omakeyd pair`, the bar widget) returns the same code rather than a new one.
+
 The phone stores `{host id, host name, addresses, port, device id, K}`.
 
 ### Discovery and reconnecting
@@ -193,10 +200,18 @@ The server, for each INPUT:
 ```
 client_time_ms   4    echoed from the INPUT being acknowledged
 last_eseq        2    newest event applied
+leds             1    optional; lock LEDs of the virtual keyboard:
+                      bit 0 = Num Lock, bit 1 = Caps Lock, bit 2 = Scroll Lock
 ```
 
 The client drops events up to `last_eseq` from its resend queue and shows
 `now - client_time_ms` as the ping.
+
+`leds` is the state the compositor last set on the `Omakey Keyboard` device,
+so the phone can show Caps Lock and friends. Servers before it, and servers
+that can't read the LEDs (`--dry-run`), send no `leds` byte: the client then
+shows no lock state, it doesn't assume "off". Clients ignore any bytes after
+the fields they know.
 
 ### BYE (5)
 
@@ -230,6 +245,22 @@ look it up over SDP) at the address from `b` or `bt_address`.
   session in use goes quiet; the first transport to be welcomed is used and
   the other stops.
 
+On the server:
+
+- It finds the adapter through BlueZ's ObjectManager (the first
+  `org.bluez.Adapter1`), registers the profile, and checks every few
+  seconds, registering again when `bluetoothd` restarts. It advertises
+  `b` and `bt_address` only while the profile is registered and the
+  adapter is powered.
+- At most 8 RFCOMM connections are served at once. A connection silent for
+  30 s is closed.
+- When a connection closes, the keys of the sessions last heard on it are
+  released at once. The session itself stays, so the phone can carry on
+  over UDP with the same session.
+- When a session's first INPUT arrives (e.g. after switching from Wi-Fi to
+  Bluetooth), its held keys are pressed before the device's older session
+  is dropped, so a key held across the switch never goes up.
+
 ### Bluetooth keyboard mode
 
 Separately, the phone can be a standard Bluetooth HID keyboard and mouse
@@ -243,13 +274,23 @@ report descriptor is in the Android app (`protocol/.../Hid.kt`).
 randoms and nonces and the exact datagrams they produce: HELLO, WELCOME
 (with the touchpad feature), two INPUTs (SUPER down, then SPACE down with
 both events un-acked), an INPUT with the left button held and a pointer
-trailer, ACK and BYE. Every implementation must reproduce them byte for byte.
+trailer, ACK (without the `leds` byte) and BYE. Every implementation must
+reproduce them byte for byte. The fingerprint of their device key is
+`630D-CD29`.
+
+The server replies to a UDP packet from the address it was sent to, so a
+desktop with several addresses answers from the one the phone knows.
 
 ## Safety rules on the server
 
 - A session that holds keys and sends nothing for **500 ms** has all its keys
   released. The next INPUT presses them again through the held set.
 - A session silent for **30 s** is dropped.
+- A device keeps at most 2 sessions that haven't had an INPUT yet; a new
+  HELLO pushes out the oldest of those, never the session in use.
+- HELLOs are rate-limited per source IP (10 per second, bursts of 20).
+  Others are dropped unread, so a flood can't burn CPU on decryption or
+  turn REJECTs into a reflector.
 - Key codes are limited to `1..=255`, `0x160..=0x2bf` and the touchpad
   buttons `0x110..=0x112`; anything else is ignored.
 - Several phones may be connected; a key is down on the virtual keyboard

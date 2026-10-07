@@ -17,9 +17,11 @@ Panel {
 
   readonly property string bin: "/usr/local/bin/omakeyd"
   // The omakeyd version this widget expects; an older one gets an Update button.
-  readonly property string expectedVersion: "0.3.0"
+  readonly property string expectedVersion: "0.4.0"
   readonly property string pluginDir: String(Qt.resolvedUrl(".")).replace(/^file:\/\//, "").replace(/\/$/, "")
-  readonly property string statePath: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/omakey/state.json"
+  // Like omakeyd, never fall back to a shared directory such as /tmp.
+  readonly property string statePath: Quickshell.env("XDG_RUNTIME_DIR")
+    ? Quickshell.env("XDG_RUNTIME_DIR") + "/omakey/state.json" : ""
 
   // ---- what the daemon publishes ----
   property var state: ({})
@@ -39,6 +41,11 @@ Panel {
   readonly property int secondsLeft: pairing ? Math.max(0, Math.round(pairing.expires_at - now)) : 0
   readonly property int pairedCount: state.paired ? state.paired.count : 0
   readonly property bool needsUpdate: running && state.daemon_version !== expectedVersion
+  // {state: "on" | "off" | "unavailable", address, reason}
+  readonly property var bluetooth: state.bluetooth && typeof state.bluetooth === "object" ? state.bluetooth : null
+  readonly property string bluetoothText: !bluetooth ? ""
+    : bluetooth.state === "on" ? "Bluetooth on"
+    : "Bluetooth off" + (bluetooth.reason ? " (" + bluetooth.reason + ")" : "")
 
   // ---- panel UI state ----
   property int pairedAtStart: -1
@@ -104,6 +111,8 @@ Panel {
         name: d.name || "Phone",
         online: d.connected === true,
         addr: d.addr || "",
+        transport: d.transport || "",
+        loss: typeof d.loss === "number" ? d.loss : -1,
         held: d.held || 0,
         lastSeen: d.last_seen || 0,
       }
@@ -208,9 +217,17 @@ Panel {
     run(["pair", "--no-wait"])
   }
   function cancelPairing() { run(["cancel-pair"]) }
+  // The link is a phone's key: copy it marked sensitive (clipboard managers
+  // skip it), pass it through the environment rather than argv (which other
+  // users can read in ps), and clear it after a minute if it's still there.
   function copyLink() {
     if (!root.pairing) return
-    Quickshell.execDetached(["wl-copy", root.pairing.uri])
+    Quickshell.execDetached({
+      command: ["sh", "-c",
+        "printf %s \"$OMAKEY_LINK\" | wl-copy --sensitive || exit; sleep 60; " +
+        "[ \"$(wl-paste --no-newline 2>/dev/null)\" = \"$OMAKEY_LINK\" ] && wl-copy --clear"],
+      environment: { OMAKEY_LINK: root.pairing.uri },
+    })
     root.copied = true
     copiedTimer.restart()
   }
@@ -487,6 +504,18 @@ Panel {
             font.pixelSize: Style.font.caption
           }
 
+          Text {
+            visible: !!(root.pairing && root.pairing.fingerprint)
+            width: parent.width
+            horizontalAlignment: Text.AlignHCenter
+            text: "Fingerprint " + (root.pairing ? root.pairing.fingerprint : "") + " · the phone shows the same code"
+            textFormat: Text.PlainText
+            wrapMode: Text.WordWrap
+            color: Util.alpha(root.bar.foreground, 0.6)
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+
           Row {
             id: pairActions
             width: parent.width
@@ -553,6 +582,8 @@ Panel {
               required property string name
               required property bool online
               required property string addr
+              required property string transport
+              required property real loss
               required property int held
               required property real lastSeen
               readonly property bool live: online && root.running
@@ -612,7 +643,10 @@ Panel {
                   width: parent.width
                   text: deviceRow.confirming ? "Forget this phone? It will need a new QR code."
                     : deviceRow.renaming ? "Enter to save, Esc to cancel"
-                    : deviceRow.live ? "Connected · " + deviceRow.addr + (deviceRow.held > 0 ? " · " + deviceRow.held + " held" : "")
+                    : deviceRow.live ? "Connected · "
+                      + (deviceRow.transport === "bluetooth" ? "Bluetooth" : "Wi-Fi " + deviceRow.addr)
+                      + (deviceRow.loss >= 1 ? " · " + Math.round(deviceRow.loss) + "% lost" : "")
+                      + (deviceRow.held > 0 ? " · " + deviceRow.held + " held" : "")
                     : "Last seen " + root.ago(deviceRow.lastSeen)
                   textFormat: Text.PlainText
                   elide: Text.ElideRight
@@ -792,7 +826,7 @@ Panel {
           visible: root.running
           width: parent.width
           text: (root.state.host_name || "") + " · UDP " + (root.state.port || "")
-                + (root.state.bluetooth ? " · Bluetooth" : "") + "\n" + (root.state.addresses || []).join(", ")
+                + (root.bluetoothText ? " · " + root.bluetoothText : "") + "\n" + (root.state.addresses || []).join(", ")
           textFormat: Text.PlainText
           wrapMode: Text.WordWrap
           lineHeight: 1.2

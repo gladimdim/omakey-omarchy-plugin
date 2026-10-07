@@ -25,7 +25,11 @@ as you like, just as on a Bluetooth keyboard, but over Wi-Fi.
   old ones.
 - **Bluetooth fallback.** Off Wi-Fi, the phone reaches `omakeyd` over
   Bluetooth instead, with the same encrypted packets. It needs `bluetoothd`
-  running; nothing extra to pair.
+  running; nothing extra to pair. `omakeyd` picks it up when Bluetooth is
+  turned on or `bluetoothd` restarts, and a held key or drag survives the
+  switch between Wi-Fi and Bluetooth.
+- **Lock lights.** Caps Lock, Num Lock and Scroll Lock state goes back to
+  the phone, so the app can show it.
 
 The app can also be a plain Bluetooth keyboard for computers without
 `omakeyd`: pair the phone in that computer's Bluetooth settings.
@@ -48,7 +52,7 @@ omarchy plugin add https://github.com/gladimdim/omakey-omarchy-plugin --enable
 | `/etc/udev/rules.d/70-omakey-uinput.rules` | lets *you* (not root) create the virtual keyboard |
 | `/etc/modules-load.d/omakey.conf` | loads `uinput` at boot |
 | `~/.config/systemd/user/omakeyd.service` | runs it in your session |
-| ufw: UDP 47800 and 5353 | only if ufw is active |
+| ufw: UDP 47800 and 5353 from private networks | only if ufw is active (10/8, 172.16/12, 192.168/16, and 100.64/10 for Tailscale) |
 
 If the service doesn't start right after installing, log out and back in
 once so the udev rule applies to your session.
@@ -61,12 +65,16 @@ Click the ⌨ icon in the bar. The panel does everything:
   (it asks for your password there). *Update the service* appears when the
   installed `omakeyd` is older than the widget.
 - **Pair** — *Pair a phone* shows a QR code for the Omakey app to scan, with
-  a countdown, *Copy link* (for pasting into the app instead) and *Cancel*.
-  Right-clicking the icon starts pairing straight away.
-- **Phones** — who is connected, from which address, how many keys they
-  hold, and when the others were last seen. Rename (✎) or forget (⛓) each
-  one.
-- **Service** — start it, stop it, restart it, or open its logs.
+  a countdown, a fingerprint the phone shows too, *Copy link* (for pasting
+  into the app instead) and *Cancel*. Right-clicking the icon starts pairing
+  straight away; opening it again shows the same code while it has more than
+  a minute left. The copied link is marked sensitive, so clipboard managers
+  skip it, and cleared after a minute.
+- **Phones** — who is connected, over Wi-Fi (with the address) or
+  Bluetooth, how many packets are being lost, how many keys they hold, and
+  when the others were last seen. Rename (✎) or forget (⛓) each one.
+- **Service** — start it, stop it, restart it, or open its logs. The footer
+  says whether Bluetooth is on, and why not when it's off.
 - **Settings** — the name your phone shows and the UDP port.
 
 The QR code is good for one phone and 5 minutes. After pairing, the phone
@@ -77,7 +85,7 @@ From a terminal: `omakeyd pair`.
 ## CLI
 
 ```
-omakeyd pair [--no-wait]        show a QR code to pair a phone
+omakeyd pair [--no-wait]        show a QR code (and its fingerprint) to pair a phone
 omakeyd cancel-pair             close the pairing window
 omakeyd status [--json]         connection status
 omakeyd devices                 list paired phones
@@ -115,6 +123,10 @@ phone ──UDP 47800, AES-GCM──▶ omakeyd ──▶ /dev/uinput ──▶ 
 - `BarWidget.qml`: the bar widget. It reads `$XDG_RUNTIME_DIR/omakey/state.json`
   and calls the CLI, so it works with any bar and the keyboard keeps working
   across `omarchy restart shell`.
+- The systemd unit is `Type=notify` with a watchdog, and sandboxed: the file
+  system is read-only except `~/.config/omakey` and
+  `$XDG_RUNTIME_DIR/omakey`, with a private `/tmp` and only IP, Unix and
+  netlink sockets.
 
 ### Security notes
 
@@ -123,6 +135,10 @@ phone ──UDP 47800, AES-GCM──▶ omakeyd ──▶ /dev/uinput ──▶ 
 - The udev rule gives the logged-in user access to `/dev/uinput`, the same
   rule Steam uses for controllers. Any program running as you can then
   create input devices.
+- `omakeyd` needs `XDG_RUNTIME_DIR` (any login session has it) and won't
+  fall back to `/tmp`, where another user could plant its socket.
+- The firewall rules only let in private and Tailscale addresses, and
+  `omakeyd` answers at most 10 handshakes per second per address.
 - Packets from unknown or tampered sources are dropped without a reply,
   except a plaintext "unknown device" notice so the app can suggest
   re-pairing.

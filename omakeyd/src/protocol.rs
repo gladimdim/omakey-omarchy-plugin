@@ -475,6 +475,8 @@ mod tests {
     fn fingerprint_is_grouped_upper_hex() {
         // SHA-256 of 32 zero bytes starts 66687aad.
         assert_eq!(fingerprint(&[0; 32]), "6668-7AAD");
+        // The test-vector key 00..1f, as docs/PROTOCOL.md quotes it.
+        assert_eq!(fingerprint(&core::array::from_fn(|i| i as u8)), "630D-CD29");
     }
 
     #[test]
