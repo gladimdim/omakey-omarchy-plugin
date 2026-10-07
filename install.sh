@@ -10,7 +10,8 @@
 #                                               the virtual keyboard
 #   /etc/modules-load.d/omakey.conf             loads uinput at boot
 #   ~/.config/systemd/user/omakeyd.service      runs it in your session
-#   ufw rules for UDP 47800 and mDNS            only if ufw is active
+#   ufw rules for UDP 47800 and mDNS            only if ufw is active, and
+#                                               only from private networks
 
 set -euo pipefail
 
@@ -26,6 +27,30 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/omakey/target}"
 
 ufw_active() { command -v ufw >/dev/null && sudo ufw status 2>/dev/null | grep -q "^Status: active"; }
+
+# Phones reach us from the LAN or a VPN (Tailscale uses 100.64.0.0/10),
+# never from the internet.
+NETS=(10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10)
+
+# ufw_rules allow|delete: our rules, one per port and private network.
+ufw_rules() {
+  local net port
+  for net in "${NETS[@]}"; do
+    for port in "$PORT" 5353; do
+      if [[ $1 == allow ]]; then
+        sudo ufw allow from "$net" to any port "$port" proto udp >/dev/null
+      else
+        sudo ufw delete allow from "$net" to any port "$port" proto udp >/dev/null 2>&1 || true
+      fi
+    done
+  done
+}
+
+# Earlier versions allowed both ports from anywhere.
+ufw_remove_old_rules() {
+  sudo ufw delete allow "$PORT/udp" >/dev/null 2>&1 || true
+  sudo ufw delete allow 5353/udp >/dev/null 2>&1 || true
+}
 
 # Ask for the sudo password once, up front, in this terminal. Without a
 # terminal (an agent's shell, a launcher) sudo can't ask, so say so and stop.
@@ -46,7 +71,8 @@ if [[ ${1:-} == --uninstall ]]; then
   sudo rm -f "$BIN" "$RULE" "$MODULES"
   sudo udevadm control --reload
   if ufw_active; then
-    sudo ufw delete allow "$PORT/udp" >/dev/null 2>&1 || true
+    ufw_rules delete
+    ufw_remove_old_rules
   fi
   echo "omakeyd removed. Paired phones are kept in ~/.config/omakey; delete it to forget them."
   exit 0
@@ -66,9 +92,9 @@ sudo udevadm control --reload
 sudo udevadm trigger --action=change --sysname-match=uinput
 
 if ufw_active; then
-  echo "Opening UDP $PORT and mDNS in ufw..."
-  sudo ufw allow "$PORT/udp" comment "Omakey phone keyboard" >/dev/null
-  sudo ufw allow 5353/udp comment "mDNS" >/dev/null
+  echo "Opening UDP $PORT and mDNS to private networks in ufw..."
+  ufw_remove_old_rules
+  ufw_rules allow
 fi
 
 mkdir -p "$(dirname "$UNIT")"

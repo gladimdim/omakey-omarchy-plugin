@@ -30,6 +30,8 @@ struct Rig {
     client: Client,
     addr: SocketAddr,
     t0: Instant,
+    device_id: DeviceId,
+    key: Key,
 }
 
 impl Rig {
@@ -49,7 +51,16 @@ impl Rig {
         });
         let rec = Recorder::default();
         let server = Server::new(shared.clone(), Keyboard::new(Box::new(rec.clone())), "desk".into());
-        Rig { server, shared, rec, client: Client::new(device_id, key), addr: "192.168.1.9:5000".parse().unwrap(), t0 }
+        Rig {
+            server,
+            shared,
+            rec,
+            client: Client::new(device_id, key),
+            addr: "192.168.1.9:5000".parse().unwrap(),
+            t0,
+            device_id,
+            key,
+        }
     }
 
     fn send(&mut self, pkt: Vec<u8>, at_ms: u64) -> Option<Reply> {
@@ -272,4 +283,159 @@ fn welcome_advertises_the_touchpad() {
     let key = r.shared.lock().unwrap().devices.devices[0].key_bytes().unwrap();
     let w = Welcome::decode(&open(&cipher(&key), &reply).unwrap()).unwrap();
     assert_eq!(w.features & FEATURE_POINTER, FEATURE_POINTER);
+}
+
+fn bt_peer(conn: u64) -> Peer {
+    Peer::Bluetooth { mac: "AA:BB:CC:DD:EE:FF".into(), conn }
+}
+
+/// Send one framed datagram on a Bluetooth stream and read the framed reply.
+fn exchange(phone: &mut std::os::unix::net::UnixStream, client: &mut Client, pkt: Vec<u8>) -> Option<Reply> {
+    use std::io::{Read, Write};
+    let mut frame = (pkt.len() as u16).to_be_bytes().to_vec();
+    frame.extend(pkt);
+    phone.write_all(&frame).unwrap();
+    let mut len = [0u8; 2];
+    phone.read_exact(&mut len).unwrap();
+    let mut reply = vec![0u8; u16::from_be_bytes(len) as usize];
+    phone.read_exact(&mut reply).unwrap();
+    client.on_packet(&reply)
+}
+
+#[test]
+fn bluetooth_stream_carries_the_same_packets() {
+    use std::os::unix::net::UnixStream;
+    let Rig { server, rec, mut client, .. } = Rig::new();
+    let server = Arc::new(Mutex::new(server));
+    let (mut phone, desk) = UnixStream::pair().unwrap();
+    // BlueZ hands the socket over non-blocking; serving must still wait for data.
+    desk.set_nonblocking(true).unwrap();
+    let s2 = server.clone();
+    let desk_thread = std::thread::spawn(move || crate::bluetooth::serve_connection(desk, bt_peer(1), &s2));
+    std::thread::sleep(Duration::from_millis(50));
+
+    let hello = client.hello("Pixel");
+    assert!(matches!(exchange(&mut phone, &mut client, hello), Some(Reply::Welcome { .. })));
+    let press = client.key(A, true, 1).unwrap();
+    assert!(exchange(&mut phone, &mut client, press).is_some());
+    assert_eq!(rec.take(), vec![(A, true)]);
+
+    drop(phone);
+    desk_thread.join().unwrap();
+    let infos = server.lock().unwrap().session_infos(Instant::now());
+    assert_eq!(infos[0].addr, "Bluetooth");
+    assert_eq!(infos[0].transport, "bluetooth");
+}
+
+#[test]
+fn bluetooth_eof_releases_keys_but_keeps_the_session() {
+    use std::os::unix::net::UnixStream;
+    let Rig { server, mut client, addr, .. } = Rig::new();
+    let server = Arc::new(Mutex::new(server));
+    let (mut phone, desk) = UnixStream::pair().unwrap();
+    let s2 = server.clone();
+    let desk_thread = std::thread::spawn(move || crate::bluetooth::serve_connection(desk, bt_peer(7), &s2));
+    let hello = client.hello("Pixel");
+    exchange(&mut phone, &mut client, hello);
+    let press = client.key(META, true, 1).unwrap();
+    exchange(&mut phone, &mut client, press);
+    assert!(server.lock().unwrap().key_down(META));
+
+    // The link drops: SUPER comes up at once, not after the stuck-key timeout.
+    drop(phone);
+    desk_thread.join().unwrap();
+    assert!(!server.lock().unwrap().key_down(META));
+    // The phone carries on over Wi-Fi in the same session.
+    let hb = client.input(10).unwrap();
+    let reply = server.lock().unwrap().handle(&hb, addr, Instant::now()).unwrap();
+    assert!(matches!(client.on_packet(&reply), Some(Reply::Ack { .. })));
+    assert!(server.lock().unwrap().key_down(META));
+}
+
+#[test]
+fn replayed_hellos_cannot_evict_the_phones_session() {
+    let mut r = Rig::new();
+    r.connect();
+    r.key(META, true, 10);
+    // An attacker replays HELLOs it captured earlier, each with its own client_random.
+    for i in 0..10 {
+        let old = Client::new(r.device_id, r.key);
+        assert!(r.server.handle(&old.hello("Pixel"), r.addr, r.t0 + Duration::from_millis(20 + i)).is_some());
+    }
+    assert!(r.server.key_down(META));
+    assert!(matches!(r.key(A, true, 40), Some(Reply::Ack { .. })));
+    assert!(r.server.key_down(A));
+}
+
+#[test]
+fn switching_transport_does_not_flicker_held_keys() {
+    use crate::keyboard::BTN_LEFT;
+    let mut r = Rig::new();
+    r.connect();
+    // A drag over Wi-Fi with SUPER held...
+    r.key(META, true, 10);
+    r.key(BTN_LEFT, true, 20);
+    r.rec.take();
+    // ...continues over Bluetooth in a new session, keys still held.
+    let mut bt = Client::new(r.device_id, r.key);
+    let w = r.server.handle(&bt.hello("Pixel"), bt_peer(3), r.t0 + Duration::from_millis(30)).unwrap();
+    assert!(matches!(bt.on_packet(&w), Some(Reply::Welcome { .. })));
+    bt.key(META, true, 40);
+    let p = bt.key(BTN_LEFT, true, 41).unwrap();
+    r.server.handle(&p, bt_peer(3), r.t0 + Duration::from_millis(41)).unwrap();
+    assert_eq!(r.rec.take(), vec![], "no key went up and down");
+    assert!(r.server.key_down(META) && r.server.key_down(BTN_LEFT));
+    // The Wi-Fi session is gone: its next packet isn't acknowledged.
+    let old = r.client.input(50).unwrap();
+    assert!(r.server.handle(&old, r.addr, r.t0 + Duration::from_millis(50)).is_none());
+}
+
+#[test]
+fn ack_carries_the_lock_leds() {
+    let mut r = Rig::new();
+    r.connect();
+    *r.rec.2.lock().unwrap() = Some(LED_CAPS | LED_NUM);
+    match r.key(A, true, 10) {
+        Some(Reply::Ack { leds, .. }) => assert_eq!(leds, Some(3)),
+        _ => panic!("no ACK"),
+    }
+    // A sink that can't read LEDs sends no trailer.
+    *r.rec.2.lock().unwrap() = None;
+    match r.key(A, false, 20) {
+        Some(Reply::Ack { leds, .. }) => assert_eq!(leds, None),
+        _ => panic!("no ACK"),
+    }
+}
+
+#[test]
+fn hellos_are_rate_limited_per_source() {
+    let mut r = Rig::new();
+    let stranger = Client::new(random_bytes(), random_bytes());
+    let from: SocketAddr = "10.0.0.66:4000".parse().unwrap();
+    let answered = |r: &mut Rig, n: usize, at: Duration| {
+        (0..n).filter(|_| r.server.handle(&stranger.hello("x"), from, r.t0 + at).is_some()).count()
+    };
+    assert_eq!(answered(&mut r, 30, Duration::ZERO), 20);
+    // The bucket refills at 10 per second.
+    assert_eq!(answered(&mut r, 30, Duration::from_millis(1000)), 10);
+    // Another source isn't affected.
+    let other = r.server.handle(&stranger.hello("x"), r.addr, r.t0 + Duration::from_millis(1000));
+    assert!(other.is_some());
+}
+
+#[test]
+fn loss_is_estimated_from_counter_gaps() {
+    let mut r = Rig::new();
+    r.connect();
+    for i in 0..20u64 {
+        let pkt = r.client.input(i as u32).unwrap();
+        // Every fourth packet is lost.
+        if i % 4 != 3 {
+            r.send(pkt, i);
+        }
+    }
+    let infos = r.server.session_infos(r.t0);
+    assert_eq!(infos[0].transport, "wifi");
+    // 19 counters seen through the last delivered one, 4 of them lost.
+    assert!((infos[0].loss - 4.0 * 100.0 / 19.0).abs() < 0.01, "{}", infos[0].loss);
 }

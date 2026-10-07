@@ -23,6 +23,12 @@ as you like, just as on a Bluetooth keyboard, but over Wi-Fi.
   Mouse", next to "Omakey Keyboard".
 - **Bar widget.** See which phones are connected, pair new ones, and forget
   old ones.
+- **Bluetooth fallback.** Off Wi-Fi, the phone reaches `omakeyd` over
+  Bluetooth instead, with the same encrypted packets. It needs `bluetoothd`
+  running; nothing extra to pair.
+
+The app can also be a plain Bluetooth keyboard for computers without
+`omakeyd`: pair the phone in that computer's Bluetooth settings.
 
 ## Install
 

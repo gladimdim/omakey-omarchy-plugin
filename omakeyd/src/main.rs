@@ -1,6 +1,9 @@
+mod bluetooth;
 mod client;
 mod daemon;
 mod keyboard;
+mod net;
+mod notify;
 mod protocol;
 mod qr;
 mod server;
@@ -96,13 +99,18 @@ fn pair(wait: bool) -> Result<(), String> {
     let v = daemon::request(json!({"cmd": "pair"}))?;
     let uri = v["uri"].as_str().unwrap_or_default().to_string();
     let start_count = v["paired_count"].as_u64().unwrap_or(0);
+    let left = v["expires_at"].as_u64().unwrap_or(0).saturating_sub(store::unix_now());
     println!("{}", qr::terminal(&uri));
+    println!("Fingerprint: {} — the phone shows the same code", v["fingerprint"].as_str().unwrap_or("?"));
     println!("Scan with the Omakey app (or paste this link into it):\n{uri}\n");
+    if v["reused"] == json!(true) {
+        println!("(This pairing code was already open; it is still the one to use.)");
+    }
     if !wait {
         return Ok(());
     }
-    println!("Waiting for your phone… (Ctrl+C to stop; the code expires in 5 minutes)");
-    let deadline = Instant::now() + server::PAIRING_TTL;
+    println!("Waiting for your phone… (Ctrl+C to stop; the code expires in {}:{:02})", left / 60, left % 60);
+    let deadline = Instant::now() + Duration::from_secs(left);
     while Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(400));
         let s = daemon::request(json!({"cmd": "status"}))?;
@@ -142,6 +150,12 @@ fn status(as_json: bool) -> Result<(), String> {
     let addrs: Vec<&str> = s["addresses"].as_array().map(|a| a.iter().filter_map(|x| x.as_str()).collect()).unwrap_or_default();
     println!("Addresses: {}", if addrs.is_empty() { "none (no network?)".into() } else { addrs.join(", ") });
     println!("Keyboard: {}", s["uinput"].as_str().unwrap_or("?"));
+    let bt = &s["bluetooth"];
+    match bt["state"].as_str() {
+        Some("on") => println!("Bluetooth: on ({})", bt["address"].as_str().unwrap_or("")),
+        Some(state) => println!("Bluetooth: {state} ({})", bt["reason"].as_str().unwrap_or("")),
+        None => {}
+    }
     let n = s["connected"].as_u64().unwrap_or(0);
     println!("Connected phones: {n}");
     if !s["pairing"].is_null() {

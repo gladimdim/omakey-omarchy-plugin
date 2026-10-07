@@ -6,7 +6,8 @@ use crate::protocol::*;
 use crate::store::{hex, unix_now, Device, Devices};
 use aes_gcm::Aes256Gcm;
 use std::collections::{BTreeSet, HashMap};
-use std::net::SocketAddr;
+use std::fmt;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -15,8 +16,13 @@ pub const STUCK_KEY_TIMEOUT: Duration = Duration::from_millis(500);
 /// A silent session is forgotten after this long.
 pub const SESSION_TIMEOUT: Duration = Duration::from_secs(30);
 pub const PAIRING_TTL: Duration = Duration::from_secs(300);
-const MAX_SESSIONS_PER_DEVICE: usize = 4;
+/// Sessions of one device still waiting for their first INPUT. A replayed
+/// HELLO can only push out these, never the session the phone is using.
+const MAX_PENDING_PER_DEVICE: usize = 2;
 const MAX_HELD: usize = 64;
+/// HELLOs per source IP: a token bucket of this rate and burst.
+const HELLO_RATE: f32 = 10.0;
+const HELLO_BURST: f32 = 20.0;
 
 pub struct Pending {
     pub device_id: DeviceId,
@@ -31,25 +37,113 @@ pub struct SessionInfo {
     pub device: String,
     pub name: String,
     pub addr: String,
+    /// "wifi" (any UDP) or "bluetooth".
+    pub transport: &'static str,
     pub held: usize,
     pub idle_ms: u64,
     pub packets: u64,
+    /// Packets lost, in percent of the last LOSS_WINDOW the phone sent.
+    pub loss: f32,
 }
 
-/// State shared with the control socket thread.
+/// What the Bluetooth fallback is doing, for state.json.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BtStatus {
+    /// "on", "off" (adapter powered off) or "unavailable".
+    pub state: &'static str,
+    pub address: Option<[u8; 6]>,
+    pub reason: String,
+}
+
+impl Default for BtStatus {
+    fn default() -> Self {
+        BtStatus { state: "unavailable", address: None, reason: "starting".into() }
+    }
+}
+
+/// State shared with the control socket and state threads. Every holder
+/// keeps it only for in-memory work: no file I/O or slow calls under it.
 pub struct Shared {
     pub devices: Devices,
     pub pending: Option<Pending>,
     /// Bumped whenever a phone finishes pairing, with its name.
     pub paired: (u64, String),
     pub sessions: Vec<SessionInfo>,
-    /// Set by the control thread when devices or pairing changed.
+    pub bluetooth: BtStatus,
+    /// Set when devices, pairing or Bluetooth changed: rewrite state.json.
     pub dirty: bool,
+    /// devices.json needs saving; `save_now` skips the debounce (pairing).
+    pub devices_dirty: bool,
+    pub save_now: bool,
+    /// Devices forgotten from the control socket whose sessions must go.
+    pub forgotten: Vec<String>,
 }
 
 impl Shared {
     pub fn new(devices: Devices) -> Shared {
-        Shared { devices, pending: None, paired: (0, String::new()), sessions: Vec::new(), dirty: true }
+        Shared {
+            devices,
+            pending: None,
+            paired: (0, String::new()),
+            sessions: Vec::new(),
+            bluetooth: BtStatus::default(),
+            dirty: true,
+            devices_dirty: false,
+            save_now: false,
+            forgotten: Vec::new(),
+        }
+    }
+
+    /// Close an expired pairing window.
+    pub fn expire_pending(&mut self, now: Instant) {
+        if self.pending.as_ref().is_some_and(|p| p.expires <= now) {
+            self.pending = None;
+            self.dirty = true;
+        }
+    }
+
+    /// Record that these devices were just connected.
+    pub fn mark_seen(&mut self, ids: &[DeviceId]) {
+        let now = unix_now();
+        for id in ids {
+            if let Some(d) = self.devices.find_mut(id) {
+                d.last_seen = now;
+                self.devices_dirty = true;
+            }
+        }
+    }
+}
+
+/// Where a session's packets come from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Peer {
+    Udp(SocketAddr),
+    /// One RFCOMM connection (`conn` is unique per connection) from the
+    /// phone with Bluetooth address `mac`.
+    Bluetooth { mac: Arc<str>, conn: u64 },
+}
+
+impl Peer {
+    pub fn transport(&self) -> &'static str {
+        match self {
+            Peer::Udp(_) => "wifi",
+            Peer::Bluetooth { .. } => "bluetooth",
+        }
+    }
+}
+
+impl From<SocketAddr> for Peer {
+    fn from(a: SocketAddr) -> Peer {
+        Peer::Udp(a)
+    }
+}
+
+impl fmt::Display for Peer {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Peer::Udp(a) => write!(f, "{}", a.ip()),
+            Peer::Bluetooth { .. } => write!(f, "Bluetooth"),
+        }
     }
 }
 
@@ -61,7 +155,7 @@ struct Session {
     device_cipher: Aes256Gcm,
     c2s: Aes256Gcm,
     s2c: Aes256Gcm,
-    addr: SocketAddr,
+    addr: Peer,
     max_counter: u64,
     server_counter: u64,
     last_eseq: u16,
@@ -69,6 +163,76 @@ struct Session {
     last_rx: Instant,
     established: bool,
     packets: u64,
+    loss: LossMeter,
+}
+
+pub const LOSS_WINDOW: usize = 256;
+
+/// Which of the last LOSS_WINDOW client counters never arrived.
+#[derive(Default)]
+struct LossMeter {
+    lost: [u64; LOSS_WINDOW / 64],
+    pos: usize,
+    filled: usize,
+}
+
+impl LossMeter {
+    fn record(&mut self, lost: bool) {
+        let (w, b) = (self.pos / 64, self.pos % 64);
+        if lost {
+            self.lost[w] |= 1 << b;
+        } else {
+            self.lost[w] &= !(1 << b);
+        }
+        self.pos = (self.pos + 1) % LOSS_WINDOW;
+        self.filled = (self.filled + 1).min(LOSS_WINDOW);
+    }
+
+    /// A packet with `counter` arrived after `max`: the ones between were lost
+    /// (or came too late to be used, which is the same to the user).
+    fn on_counter(&mut self, max: u64, counter: u64) {
+        for _ in 0..(counter - max - 1).min(LOSS_WINDOW as u64) {
+            self.record(true);
+        }
+        self.record(false);
+    }
+
+    fn percent(&self) -> f32 {
+        if self.filled == 0 {
+            return 0.0;
+        }
+        let lost: u32 = self.lost.iter().map(|w| w.count_ones()).sum();
+        lost as f32 * 100.0 / self.filled as f32
+    }
+}
+
+/// Token buckets per source IP for HELLOs. Each costs a decrypt, and a
+/// REJECT to a spoofed source would make us a reflector.
+#[derive(Default)]
+struct RateLimiter {
+    buckets: HashMap<IpAddr, (f32, Instant)>,
+}
+
+impl RateLimiter {
+    fn allow(&mut self, ip: IpAddr, now: Instant) -> bool {
+        if self.buckets.len() >= 4096 {
+            // A bucket idle this long is full again, as if it weren't there.
+            let full = Duration::from_secs_f32(HELLO_BURST / HELLO_RATE);
+            self.buckets.retain(|_, (_, t)| now.saturating_duration_since(*t) < full);
+            if self.buckets.len() >= 4096 {
+                self.buckets.clear();
+            }
+        }
+        let (tokens, last) = self.buckets.entry(ip).or_insert((HELLO_BURST, now));
+        *tokens = (*tokens + now.saturating_duration_since(*last).as_secs_f32() * HELLO_RATE).min(HELLO_BURST);
+        *last = now;
+        if *tokens >= 1.0 {
+            *tokens -= 1.0;
+            true
+        } else {
+            false
+        }
+    }
 }
 
 pub struct Server {
@@ -76,22 +240,45 @@ pub struct Server {
     kb: Keyboard,
     sessions: HashMap<u32, Session>,
     host_name: String,
+    /// Sent in WELCOME so phones learn where to reach us over Bluetooth.
+    /// Some only while the profile is registered and the adapter is on.
+    pub bt_address: Option<[u8; 6]>,
     /// Set when sessions came or went, so the state file gets rewritten.
     pub changed: bool,
+    /// Devices whose session just ended, for their last_seen.
+    seen: Vec<DeviceId>,
+    hello_limit: RateLimiter,
 }
 
 impl Server {
     pub fn new(shared: Arc<Mutex<Shared>>, kb: Keyboard, host_name: String) -> Server {
-        Server { shared, kb, sessions: HashMap::new(), host_name, changed: true }
+        Server {
+            shared,
+            kb,
+            sessions: HashMap::new(),
+            host_name,
+            bt_address: None,
+            changed: true,
+            seen: Vec::new(),
+            hello_limit: RateLimiter::default(),
+        }
     }
 
-    pub fn handle(&mut self, pkt: &[u8], from: SocketAddr, now: Instant) -> Option<Vec<u8>> {
+    pub fn handle(&mut self, pkt: &[u8], from: impl Into<Peer>, now: Instant) -> Option<Vec<u8>> {
+        let from = from.into();
         if pkt.len() > MAX_DATAGRAM {
             return None;
         }
         let header = Header::decode(pkt)?;
         match header.kind {
-            T_HELLO => self.on_hello(&header, pkt, from, now),
+            T_HELLO => {
+                if let Peer::Udp(a) = &from {
+                    if !self.hello_limit.allow(a.ip(), now) {
+                        return None;
+                    }
+                }
+                self.on_hello(&header, pkt, from, now)
+            }
             T_INPUT => self.on_input(&header, pkt, from, now),
             T_BYE => {
                 self.on_bye(&header, pkt);
@@ -101,7 +288,7 @@ impl Server {
         }
     }
 
-    fn on_hello(&mut self, header: &Header, pkt: &[u8], from: SocketAddr, now: Instant) -> Option<Vec<u8>> {
+    fn on_hello(&mut self, header: &Header, pkt: &[u8], from: Peer, now: Instant) -> Option<Vec<u8>> {
         let id = header.device_id;
         let (key, pairing) = {
             let shared = self.shared.lock().unwrap();
@@ -129,9 +316,9 @@ impl Server {
                     paired_at: unix_now(),
                     last_seen: unix_now(),
                 });
-                if let Err(e) = shared.devices.save() {
-                    eprintln!("omakeyd: couldn't save devices.json: {e}");
-                }
+                // The state thread saves it right away, outside our locks.
+                shared.devices_dirty = true;
+                shared.save_now = true;
                 shared.paired = (shared.paired.0 + 1, name.clone());
                 shared.dirty = true;
                 eprintln!("omakeyd: paired {name} ({})", hex(&id));
@@ -141,9 +328,10 @@ impl Server {
         // A retried HELLO gets the same session back.
         if let Some(s) = self
             .sessions
-            .values()
+            .values_mut()
             .find(|s| s.device_id == id && !s.established && s.client_random == hello.client_random)
         {
+            s.last_rx = now;
             let h = Header { kind: T_WELCOME, device_id: id, nonce: random_bytes() };
             return Some(seal(&s.device_cipher, &h, &s.welcome));
         }
@@ -163,6 +351,7 @@ impl Server {
             session_id,
             name: self.host_name.clone(),
             features: FEATURE_POINTER,
+            bt_address: self.bt_address,
         }
         .encode();
         let h = Header { kind: T_WELCOME, device_id: id, nonce: random_bytes() };
@@ -185,24 +374,27 @@ impl Server {
                 last_rx: now,
                 established: false,
                 packets: 0,
+                loss: LossMeter::default(),
             },
         );
         Some(reply)
     }
 
-    /// Keep at most a few sessions per device, dropping the oldest.
+    /// Make room for a new session of this device by dropping its oldest
+    /// not-yet-used ones. The established session is never touched: replayed
+    /// HELLOs must not kick the phone off.
     fn trim_sessions(&mut self, id: &DeviceId) {
-        let mut mine: Vec<(Instant, u32)> = self
+        let mut waiting: Vec<(Instant, u32)> = self
             .sessions
             .iter()
-            .filter(|(_, s)| &s.device_id == id)
+            .filter(|(_, s)| &s.device_id == id && !s.established)
             .map(|(sid, s)| (s.last_rx, *sid))
             .collect();
-        if mine.len() < MAX_SESSIONS_PER_DEVICE {
+        if waiting.len() < MAX_PENDING_PER_DEVICE {
             return;
         }
-        mine.sort();
-        for (_, sid) in mine.iter().take(mine.len() + 1 - MAX_SESSIONS_PER_DEVICE) {
+        waiting.sort();
+        for (_, sid) in waiting.iter().take(waiting.len() + 1 - MAX_PENDING_PER_DEVICE) {
             self.drop_session(*sid);
         }
     }
@@ -219,11 +411,12 @@ impl Server {
         if counter <= s.max_counter {
             return None;
         }
+        s.loss.on_counter(s.max_counter, counter);
         s.max_counter = counter;
         Some((sid, plain))
     }
 
-    fn on_input(&mut self, header: &Header, pkt: &[u8], from: SocketAddr, now: Instant) -> Option<Vec<u8>> {
+    fn on_input(&mut self, header: &Header, pkt: &[u8], from: Peer, now: Instant) -> Option<Vec<u8>> {
         let (sid, plain) = self.authenticate(header, pkt)?;
         let input = Input::decode(&plain)?;
 
@@ -236,6 +429,9 @@ impl Server {
             s.established = true;
             first
         };
+        // The new session's keys go down before an older session's come up,
+        // so a key held across a Wi-Fi/Bluetooth switch never flickers.
+        self.apply(sid, &input);
         if first {
             // The phone now uses this session; older ones of the device go.
             let dev = header.device_id;
@@ -251,6 +447,16 @@ impl Server {
             self.changed = true;
         }
 
+        let leds = self.kb.leds();
+        let s = self.sessions.get_mut(&sid).unwrap();
+        s.server_counter += 1;
+        let h = Header { kind: T_ACK, device_id: s.device_id, nonce: session_nonce(sid, s.server_counter) };
+        let ack = Ack { client_time_ms: input.client_time_ms, last_eseq: s.last_eseq, leds }.encode();
+        Some(seal(&s.s2c, &h, &ack))
+    }
+
+    /// Apply one INPUT's events, held set and pointer to its session.
+    fn apply(&mut self, sid: u32, input: &Input) {
         let s = self.sessions.get_mut(&sid).unwrap();
         let kb = &mut self.kb;
 
@@ -291,11 +497,6 @@ impl Server {
                 kb.pointer(p);
             }
         }
-
-        s.server_counter += 1;
-        let h = Header { kind: T_ACK, device_id: s.device_id, nonce: session_nonce(sid, s.server_counter) };
-        let ack = Ack { client_time_ms: input.client_time_ms, last_eseq: s.last_eseq }.encode();
-        Some(seal(&s.s2c, &h, &ack))
     }
 
     fn on_bye(&mut self, header: &Header, pkt: &[u8]) {
@@ -317,17 +518,36 @@ impl Server {
         if let Some(mut s) = self.sessions.remove(&sid) {
             Self::release_all(&mut self.kb, &mut s);
             if s.established {
-                let mut shared = self.shared.lock().unwrap();
-                if let Some(d) = shared.devices.find_mut(&s.device_id) {
-                    d.last_seen = unix_now();
-                    let _ = shared.devices.save();
-                }
+                self.seen.push(s.device_id);
                 self.changed = true;
             }
         }
     }
 
-    /// Timeouts. Call often (every ~50 ms).
+    /// Devices whose session ended since the last call, for their last_seen.
+    pub fn take_seen(&mut self) -> Vec<DeviceId> {
+        std::mem::take(&mut self.seen)
+    }
+
+    /// End the sessions of a device that was forgotten.
+    pub fn drop_device(&mut self, hex_id: &str) {
+        let gone: Vec<u32> = self.sessions.iter().filter(|(_, s)| hex(&s.device_id) == hex_id).map(|(k, _)| *k).collect();
+        for sid in gone {
+            self.drop_session(sid);
+        }
+    }
+
+    /// A transport connection closed: let go of the keys of the sessions
+    /// last heard on it. The sessions stay, as the phone may carry on over
+    /// another transport.
+    pub fn peer_gone(&mut self, peer: &Peer) {
+        for s in self.sessions.values_mut().filter(|s| &s.addr == peer) {
+            Self::release_all(&mut self.kb, s);
+        }
+        self.changed = true;
+    }
+
+    /// Timeouts. Call often (every ~50 ms). Also drains the LED events.
     pub fn tick(&mut self, now: Instant) {
         let mut expired = Vec::new();
         for (sid, s) in self.sessions.iter_mut() {
@@ -341,23 +561,8 @@ impl Server {
         for sid in expired {
             self.drop_session(sid);
         }
-
-        let gone: Vec<u32> = {
-            let mut shared = self.shared.lock().unwrap();
-            if shared.pending.as_ref().is_some_and(|p| p.expires <= now) {
-                shared.pending = None;
-                shared.dirty = true;
-            }
-            // Sessions whose device was forgotten.
-            self.sessions
-                .iter()
-                .filter(|(_, s)| shared.devices.find(&s.device_id).is_none())
-                .map(|(k, _)| *k)
-                .collect()
-        };
-        for sid in gone {
-            self.drop_session(sid);
-        }
+        // The kernel keeps only a few events for us; read them before they wrap.
+        self.kb.leds();
     }
 
     pub fn session_infos(&self, now: Instant) -> Vec<SessionInfo> {
@@ -368,10 +573,12 @@ impl Server {
             .map(|s| SessionInfo {
                 device: hex(&s.device_id),
                 name: s.name.clone(),
-                addr: s.addr.ip().to_string(),
+                addr: s.addr.to_string(),
+                transport: s.addr.transport(),
                 held: s.pressed.len(),
                 idle_ms: now.saturating_duration_since(s.last_rx).as_millis() as u64,
                 packets: s.packets,
+                loss: s.loss.percent(),
             })
             .collect();
         v.sort_by(|a, b| a.name.cmp(&b.name));

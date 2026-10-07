@@ -203,6 +203,9 @@ pub struct Welcome {
     pub name: String,
     /// FEATURE_* bits; 0 from servers that predate them.
     pub features: u8,
+    /// The server's Bluetooth adapter, so a phone paired over Wi-Fi can
+    /// fall back to Bluetooth. Absent when the server has no Bluetooth.
+    pub bt_address: Option<[u8; 6]>,
 }
 
 impl Welcome {
@@ -213,6 +216,9 @@ impl Welcome {
         out.extend_from_slice(&self.session_id.to_be_bytes());
         push_name(&mut out, &self.name);
         out.push(self.features);
+        if let Some(a) = self.bt_address {
+            out.extend_from_slice(&a);
+        }
         out
     }
     pub fn decode(buf: &[u8]) -> Option<Welcome> {
@@ -223,6 +229,7 @@ impl Welcome {
             session_id: r.u32()?,
             name: r.name()?,
             features: r.u8().unwrap_or(0),
+            bt_address: r.take(6).map(|s| s.try_into().unwrap()),
         })
     }
 }
@@ -318,23 +325,42 @@ impl Input {
     }
 }
 
+/// ACK `leds` bits.
+pub const LED_NUM: u8 = 1;
+pub const LED_CAPS: u8 = 2;
+pub const LED_SCROLL: u8 = 4;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Ack {
     pub client_time_ms: u32,
     pub last_eseq: u16,
+    /// Optional trailer: the keyboard's lock LEDs (LED_* bits). Absent from
+    /// servers that predate it or can't read them.
+    pub leds: Option<u8>,
 }
 
 impl Ack {
     pub fn encode(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(6);
+        let mut out = Vec::with_capacity(7);
         out.extend_from_slice(&self.client_time_ms.to_be_bytes());
         out.extend_from_slice(&self.last_eseq.to_be_bytes());
+        if let Some(l) = self.leds {
+            out.push(l);
+        }
         out
     }
     pub fn decode(buf: &[u8]) -> Option<Ack> {
         let mut r = Reader::new(buf);
-        Some(Ack { client_time_ms: r.u32()?, last_eseq: r.u16()? })
+        Some(Ack { client_time_ms: r.u32()?, last_eseq: r.u16()?, leds: r.u8() })
     }
+}
+
+/// The pairing fingerprint both screens show: the first 4 bytes of
+/// SHA-256(K) as "ABCD-1234".
+pub fn fingerprint(key: &Key) -> String {
+    use sha2::Digest;
+    let d = Sha256::digest(key);
+    format!("{:02X}{:02X}-{:02X}{:02X}", d[0], d[1], d[2], d[3])
 }
 
 /// Plaintext REJECT datagram.
@@ -414,10 +440,41 @@ mod tests {
 
     #[test]
     fn welcome_features_default_to_zero_for_old_servers() {
-        let w = Welcome { client_random: [1; 16], server_random: [2; 16], session_id: 9, name: "d".into(), features: 1 };
+        let w = Welcome { client_random: [1; 16], server_random: [2; 16], session_id: 9, name: "d".into(), features: 1, bt_address: None };
         let enc = w.encode();
         assert_eq!(Welcome::decode(&enc).unwrap(), w);
         assert_eq!(Welcome::decode(&enc[..enc.len() - 1]).unwrap().features, 0);
+    }
+
+    #[test]
+    fn welcome_carries_the_bluetooth_address_after_features() {
+        let mut w = Welcome { client_random: [1; 16], server_random: [2; 16], session_id: 9, name: "d".into(), features: 1, bt_address: None };
+        let without = w.encode();
+        w.bt_address = Some([0x14, 0x18, 0xc3, 0x68, 0x87, 0x1e]);
+        let with = w.encode();
+        assert_eq!(with.len(), without.len() + 6);
+        assert_eq!(Welcome::decode(&with).unwrap(), w);
+        assert_eq!(Welcome::decode(&without).unwrap().bt_address, None);
+    }
+
+    #[test]
+    fn ack_leds_trailer_round_trips_and_is_optional() {
+        let a = Ack { client_time_ms: 1016, last_eseq: 2, leds: None };
+        let plain = a.encode();
+        assert_eq!(plain.len(), 6);
+        assert_eq!(Ack::decode(&plain).unwrap(), a);
+        let with = Ack { leds: Some(LED_CAPS | LED_NUM), ..a };
+        let enc = with.encode();
+        assert_eq!(enc, [plain.as_slice(), &[3]].concat());
+        assert_eq!(Ack::decode(&enc).unwrap(), with);
+        // Bytes after the known fields are ignored.
+        assert_eq!(Ack::decode(&[enc.as_slice(), &[9, 9]].concat()).unwrap(), with);
+    }
+
+    #[test]
+    fn fingerprint_is_grouped_upper_hex() {
+        // SHA-256 of 32 zero bytes starts 66687aad.
+        assert_eq!(fingerprint(&[0; 32]), "6668-7AAD");
     }
 
     #[test]

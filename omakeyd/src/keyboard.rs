@@ -1,7 +1,9 @@
 //! The virtual keyboard. Keys are reference-counted across sessions so two
 //! phones holding the same key don't release it for each other.
 
+use crate::protocol::{LED_CAPS, LED_NUM, LED_SCROLL};
 use std::io;
+use std::os::fd::{AsRawFd, OwnedFd};
 
 pub const KEY_MAX: u16 = 0x2ff;
 
@@ -37,12 +39,17 @@ pub trait KeySink {
     fn pointer(&mut self, _p: crate::protocol::Pointer) -> io::Result<()> {
         Ok(())
     }
+    /// The lock LEDs the compositor set (protocol LED_* bits), or None when
+    /// this sink can't tell.
+    fn leds(&mut self) -> Option<u8> {
+        None
+    }
 }
 
 /// Two virtual devices: a keyboard, and a mouse for the phone's touchpad.
 /// Keeping them apart stops the compositor treating the keyboard as a pointer.
 pub struct Uinput {
-    keyboard: evdev::uinput::VirtualDevice,
+    keyboard: RawKeyboard,
     mouse: evdev::uinput::VirtualDevice,
     /// Hi-res scroll not yet sent as whole notches, for apps that only read REL_WHEEL.
     wheel_rest: i32,
@@ -51,19 +58,7 @@ pub struct Uinput {
 
 impl Uinput {
     pub fn open() -> io::Result<Uinput> {
-        let mut keys = evdev::AttributeSet::<evdev::KeyCode>::new();
-        for code in 1..=KEY_MAX {
-            if is_key(code) {
-                keys.insert(evdev::KeyCode::new(code));
-            }
-        }
-        let keyboard = evdev::uinput::VirtualDevice::builder()?
-            .name("Omakey Keyboard")
-            // BUS_VIRTUAL; vendor/product are arbitrary but stable so the
-            // compositor's per-device config can match them.
-            .input_id(evdev::InputId::new(evdev::BusType::BUS_VIRTUAL, 0x4f4b, 0x0001, 1))
-            .with_keys(&keys)?
-            .build()?;
+        let keyboard = RawKeyboard::open()?;
 
         let mut buttons = evdev::AttributeSet::<evdev::KeyCode>::new();
         for code in BTN_LEFT..=BTN_MIDDLE {
@@ -90,6 +85,134 @@ impl Uinput {
     }
 }
 
+const EV_SYN: u16 = 0;
+const EV_KEY: u16 = 1;
+const EV_LED: u16 = 0x11;
+
+/// `_IOC` in the generic Linux encoding (x86, ARM, RISC-V).
+const fn ioc(write: bool, nr: u8, size: usize) -> libc::Ioctl {
+    (((write as u32) << 30) | ((size as u32) << 16) | ((b'U' as u32) << 8) | nr as u32) as libc::Ioctl
+}
+const UI_DEV_CREATE: libc::Ioctl = ioc(false, 1, 0);
+const UI_DEV_DESTROY: libc::Ioctl = ioc(false, 2, 0);
+const UI_DEV_SETUP: libc::Ioctl = ioc(true, 3, std::mem::size_of::<libc::uinput_setup>());
+const UI_SET_EVBIT: libc::Ioctl = ioc(true, 100, 4);
+const UI_SET_KEYBIT: libc::Ioctl = ioc(true, 101, 4);
+const UI_SET_LEDBIT: libc::Ioctl = ioc(true, 105, 4);
+
+/// "Omakey Keyboard", made with raw uinput ioctls because evdev's builder
+/// can't declare LEDs. With Num/Caps/Scroll Lock LEDs the compositor tells
+/// us the lock state, which the phone shows.
+struct RawKeyboard {
+    fd: OwnedFd,
+    leds: u8,
+}
+
+impl RawKeyboard {
+    fn open() -> io::Result<RawKeyboard> {
+        use std::os::unix::fs::OpenOptionsExt;
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .custom_flags(libc::O_NONBLOCK | libc::O_CLOEXEC)
+            .open("/dev/uinput")?;
+        let fd = OwnedFd::from(file);
+        let raw = fd.as_raw_fd();
+        let set = |req: libc::Ioctl, v: u16| -> io::Result<()> {
+            // SAFETY: these ioctls take an int by value.
+            if unsafe { libc::ioctl(raw, req, v as libc::c_int) } < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(())
+        };
+        set(UI_SET_EVBIT, EV_KEY)?;
+        for code in 1..=KEY_MAX {
+            if is_key(code) {
+                set(UI_SET_KEYBIT, code)?;
+            }
+        }
+        set(UI_SET_EVBIT, EV_LED)?;
+        for led in 0..3 {
+            set(UI_SET_LEDBIT, led)?;
+        }
+        // SAFETY: plain C struct, all zeroes is valid.
+        let mut setup: libc::uinput_setup = unsafe { std::mem::zeroed() };
+        // BUS_VIRTUAL; vendor/product are arbitrary but stable so the
+        // compositor's per-device config can match them.
+        setup.id = libc::input_id { bustype: 0x06, vendor: 0x4f4b, product: 0x0001, version: 1 };
+        for (d, s) in setup.name.iter_mut().zip(b"Omakey Keyboard") {
+            *d = *s as libc::c_char;
+        }
+        // SAFETY: UI_DEV_SETUP reads one uinput_setup; UI_DEV_CREATE takes no argument.
+        if unsafe { libc::ioctl(raw, UI_DEV_SETUP, &setup as *const libc::uinput_setup) } < 0
+            || unsafe { libc::ioctl(raw, UI_DEV_CREATE) } < 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(RawKeyboard { fd, leds: 0 })
+    }
+
+    /// One key change and its SYN_REPORT, in one write.
+    fn emit_key(&mut self, code: u16, down: bool) -> io::Result<()> {
+        let ev = |kind: u16, code: u16, value: i32| libc::input_event {
+            time: libc::timeval { tv_sec: 0, tv_usec: 0 },
+            type_: kind,
+            code,
+            value,
+        };
+        let evs = [ev(EV_KEY, code, down as i32), ev(EV_SYN, 0, 0)];
+        let len = std::mem::size_of_val(&evs);
+        // SAFETY: writes `len` bytes from a live array.
+        let n = unsafe { libc::write(self.fd.as_raw_fd(), evs.as_ptr().cast(), len) };
+        if n < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if n as usize != len {
+            return Err(io::Error::new(io::ErrorKind::WriteZero, "short uinput write"));
+        }
+        Ok(())
+    }
+
+    /// Drain the LED events the compositor wrote to our device. Non-blocking.
+    fn poll_leds(&mut self) -> u8 {
+        // SAFETY: plain C structs, all zeroes is valid.
+        let mut evs: [libc::input_event; 16] = unsafe { std::mem::zeroed() };
+        loop {
+            // SAFETY: reads at most the array's size into it.
+            let n = unsafe { libc::read(self.fd.as_raw_fd(), evs.as_mut_ptr().cast(), std::mem::size_of_val(&evs)) };
+            if n <= 0 {
+                break;
+            }
+            let count = n as usize / std::mem::size_of::<libc::input_event>();
+            for e in &evs[..count] {
+                // LED_NUML, LED_CAPSL, LED_SCROLLL
+                let bit = match (e.type_, e.code) {
+                    (EV_LED, 0) => LED_NUM,
+                    (EV_LED, 1) => LED_CAPS,
+                    (EV_LED, 2) => LED_SCROLL,
+                    _ => continue,
+                };
+                if e.value != 0 {
+                    self.leds |= bit;
+                } else {
+                    self.leds &= !bit;
+                }
+            }
+            if count < evs.len() {
+                break;
+            }
+        }
+        self.leds
+    }
+}
+
+impl Drop for RawKeyboard {
+    fn drop(&mut self) {
+        // SAFETY: takes no argument; closing the fd would destroy it too.
+        unsafe { libc::ioctl(self.fd.as_raw_fd(), UI_DEV_DESTROY) };
+    }
+}
+
 /// Whole notches in `rest` + `delta` (1/120 units), keeping the remainder.
 fn notches(rest: &mut i32, delta: i16) -> i32 {
     *rest += delta as i32;
@@ -100,14 +223,18 @@ fn notches(rest: &mut i32, delta: i16) -> i32 {
 
 impl KeySink for Uinput {
     fn key(&mut self, code: u16, down: bool) -> io::Result<()> {
-        let ev = evdev::InputEvent::new(evdev::EventType::KEY.0, code, down as i32);
-        // emit() appends SYN_REPORT, so every key is its own frame and the
-        // compositor sees presses in exactly the order we send them.
+        // Every key is its own frame, so the compositor sees presses in
+        // exactly the order we send them.
         if is_button(code) {
+            let ev = evdev::InputEvent::new(evdev::EventType::KEY.0, code, down as i32);
             self.mouse.emit(&[ev])
         } else {
-            self.keyboard.emit(&[ev])
+            self.keyboard.emit_key(code, down)
         }
+    }
+
+    fn leds(&mut self) -> Option<u8> {
+        Some(self.keyboard.poll_leds())
     }
 
     fn pointer(&mut self, p: crate::protocol::Pointer) -> io::Result<()> {
@@ -167,6 +294,11 @@ impl Keyboard {
         Keyboard { sink, count: vec![0; KEY_MAX as usize + 1] }
     }
 
+    /// Current lock LEDs (protocol LED_* bits), when the device reports them.
+    pub fn leds(&mut self) -> Option<u8> {
+        self.sink.leds()
+    }
+
     pub fn press(&mut self, code: u16) {
         let c = &mut self.count[code as usize];
         if *c == 0 {
@@ -207,8 +339,13 @@ pub mod test_sink {
     use super::*;
     use std::sync::{Arc, Mutex};
 
+    /// Keys, pointer motion, and the LED state to report.
     #[derive(Clone, Default)]
-    pub struct Recorder(pub Arc<Mutex<Vec<(u16, bool)>>>, pub Arc<Mutex<Vec<crate::protocol::Pointer>>>);
+    pub struct Recorder(
+        pub Arc<Mutex<Vec<(u16, bool)>>>,
+        pub Arc<Mutex<Vec<crate::protocol::Pointer>>>,
+        pub Arc<Mutex<Option<u8>>>,
+    );
 
     impl KeySink for Recorder {
         fn key(&mut self, code: u16, down: bool) -> io::Result<()> {
@@ -218,6 +355,9 @@ pub mod test_sink {
         fn pointer(&mut self, p: crate::protocol::Pointer) -> io::Result<()> {
             self.1.lock().unwrap().push(p);
             Ok(())
+        }
+        fn leds(&mut self) -> Option<u8> {
+            *self.2.lock().unwrap()
         }
     }
 

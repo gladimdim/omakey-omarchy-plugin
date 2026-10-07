@@ -15,6 +15,8 @@ pub struct PairInfo {
     pub port: u16,
     pub device_id: DeviceId,
     pub key: Key,
+    /// Bluetooth adapter address, for the Bluetooth fallback.
+    pub bt: Option<[u8; 6]>,
 }
 
 pub fn percent_encode(s: &str) -> String {
@@ -54,7 +56,7 @@ fn percent_decode(s: &str) -> Option<String> {
 
 impl PairInfo {
     pub fn to_uri(&self) -> String {
-        format!(
+        let mut uri = format!(
             "omakey://pair?v=1&h={}&n={}&a={}&p={}&d={}&k={}",
             hex(&self.host_id),
             percent_encode(&self.host_name),
@@ -62,12 +64,16 @@ impl PairInfo {
             self.port,
             hex(&self.device_id),
             crate::store::b64(&self.key)
-        )
+        );
+        if let Some(b) = self.bt {
+            uri.push_str(&format!("&b={}", hex(&b)));
+        }
+        uri
     }
 
     pub fn parse(uri: &str) -> Option<PairInfo> {
         let query = uri.strip_prefix("omakey://pair?")?;
-        let (mut h, mut n, mut a, mut p, mut d, mut k, mut v) = (None, None, None, None, None, None, None);
+        let (mut h, mut n, mut a, mut p, mut d, mut k, mut v, mut b) = (None, None, None, None, None, None, None, None);
         for part in query.split('&') {
             let (key, val) = part.split_once('=')?;
             let val = percent_decode(val)?;
@@ -79,20 +85,21 @@ impl PairInfo {
                 "p" => p = val.parse().ok(),
                 "d" => d = unhex::<8>(&val),
                 "k" => k = unb64_key(&val),
+                "b" => b = unhex::<6>(&val),
                 _ => {}
             }
         }
         if v.as_deref() != Some("1") {
             return None;
         }
-        Some(PairInfo { host_id: h?, host_name: n.unwrap_or_default(), addrs: a?, port: p?, device_id: d?, key: k? })
+        Some(PairInfo { host_id: h?, host_name: n.unwrap_or_default(), addrs: a?, port: p?, device_id: d?, key: k?, bt: b })
     }
 }
 
 #[allow(dead_code)] // fields are part of the API the tests use
 pub enum Reply {
     Welcome { host_name: String },
-    Ack { client_time_ms: u32, last_eseq: u16 },
+    Ack { client_time_ms: u32, last_eseq: u16, leds: Option<u8> },
     Reject(u8),
 }
 
@@ -183,7 +190,7 @@ impl Client {
                 while self.unacked.front().is_some_and(|e| !eseq_newer(e.eseq, ack.last_eseq)) {
                     self.unacked.pop_front();
                 }
-                Some(Reply::Ack { client_time_ms: ack.client_time_ms, last_eseq: ack.last_eseq })
+                Some(Reply::Ack { client_time_ms: ack.client_time_ms, last_eseq: ack.last_eseq, leds: ack.leds })
             }
             _ => None,
         }
@@ -250,6 +257,7 @@ mod tests {
             port: 47800,
             device_id: [9; 8],
             key: [0xab; 32],
+            bt: Some([0x14, 0x18, 0xc3, 0x68, 0x87, 0x1e]),
         };
         let uri = p.to_uri();
         assert!(!uri.contains(' '));

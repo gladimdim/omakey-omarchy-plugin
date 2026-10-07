@@ -261,8 +261,11 @@ Panel {
     id: button
     anchors.fill: parent
     bar: root.bar
-    // nf-md-keyboard / nf-md-keyboard_off
-    text: root.phase === "running" || root.phase === "probing" ? "󰌌" : "󰌐"
+    iconComponent: Component {
+      OmakeyIcon {
+        color: button.active && button.useActiveColor ? button.activeColor : button.foreground
+      }
+    }
     active: root.connected > 0
     dimmed: root.phase !== "running" && root.phase !== "probing"
     tooltipText: root.opened ? "" : (root.connected > 0
@@ -323,6 +326,13 @@ Panel {
 
             Row {
               spacing: Style.space(8)
+
+              OmakeyIcon {
+                width: Style.space(24)
+                height: width
+                anchors.verticalCenter: parent.verticalCenter
+                color: Color.accent
+              }
 
               Text {
                 text: "Omakey"
@@ -781,7 +791,8 @@ Panel {
         Text {
           visible: root.running
           width: parent.width
-          text: (root.state.host_name || "") + " · UDP " + (root.state.port || "") + "\n" + (root.state.addresses || []).join(", ")
+          text: (root.state.host_name || "") + " · UDP " + (root.state.port || "")
+                + (root.state.bluetooth ? " · Bluetooth" : "") + "\n" + (root.state.addresses || []).join(", ")
           textFormat: Text.PlainText
           wrapMode: Text.WordWrap
           lineHeight: 1.2

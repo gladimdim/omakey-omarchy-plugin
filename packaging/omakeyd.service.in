@@ -1,12 +1,37 @@
 [Unit]
 Description=Omakey: your phone as a keyboard
 Documentation=https://github.com/gladimdim/omakey-omarchy-plugin
-After=network-online.target
+# No network-online.target: a user manager can't wait for it. omakeyd binds
+# 0.0.0.0 and picks up address changes by itself.
 
 [Service]
+Type=notify
 ExecStart=@BIN@ run
 Restart=on-failure
 RestartSec=2
+# omakeyd pings every third of this from its main loop.
+WatchdogSec=10
+
+# $XDG_RUNTIME_DIR/omakey (state.json, ctl.sock) and ~/.config/omakey,
+# both mode 700; under ProtectSystem=strict they are the only writable paths.
+RuntimeDirectory=omakey
+RuntimeDirectoryMode=0700
+ConfigurationDirectory=omakey
+ConfigurationDirectoryMode=0700
+
+# Hardening. In a user unit the mount namespacing below needs
+# PrivateUsers=yes (the user is mapped to itself, so the uaccess ACL on
+# /dev/uinput still applies). No PrivateDevices=/DevicePolicy=: the
+# virtual keyboard lives in /dev. Bluetooth sockets arrive as fds over
+# D-Bus, so AF_BLUETOOTH isn't needed.
+PrivateUsers=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+PrivateTmp=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+LockPersonality=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
 
 [Install]
 WantedBy=default.target

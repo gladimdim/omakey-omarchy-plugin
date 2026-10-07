@@ -38,11 +38,13 @@ All integers are **big-endian**. Lengths are in bytes.
 Pairing is a QR code shown by `omakeyd pair` or the bar widget:
 
 ```
-omakey://pair?v=1&h=<host id hex>&n=<host name>&a=<ip>[,<ip>...]&p=<port>&d=<device id hex>&k=<K, base64url, no padding>
+omakey://pair?v=1&h=<host id hex>&n=<host name>&a=<ip>[,<ip>...]&p=<port>&d=<device id hex>&k=<K, base64url, no padding>[&b=<bt address hex>]
 ```
 
 `n` is percent-encoded UTF-8. `a` lists the server's IPv4 addresses, LAN
-addresses first. The server writes the device to
+addresses first. `b`, when the server has Bluetooth, is its adapter
+address as 12 hex digits (`1418c368871e` for `14:18:C3:68:87:1E`); see
+[Bluetooth](#bluetooth). The server writes the device to
 `~/.config/omakey/devices.json` the first time a HELLO with that device id
 decrypts, and closes the pairing window; each QR code pairs one phone. If no
 phone uses it, it expires after 5 minutes.
@@ -97,8 +99,9 @@ name             name_len   UTF-8 phone name, at most 64 bytes
 platform         1          1 = Android, 2 = iOS
 ```
 
-The client resends HELLO every 250 ms (with a fresh nonce and the same
-`client_random`) until WELCOME arrives.
+The client resends HELLO (with a fresh nonce and the same `client_random`)
+until WELCOME arrives: after 50 ms at first, doubling up to every 250 ms. It
+sends one at once to any address it newly learns, e.g. over mDNS.
 
 ### WELCOME (2)
 
@@ -109,10 +112,12 @@ session_id       4
 name_len         1
 name             name_len   UTF-8 host name
 features         1          optional; bit 0 = touchpad (pointer) support
+bt_address       6          optional; the server's Bluetooth adapter
 ```
 
-Servers before the touchpad send no `features` byte; read it as 0. Clients
-ignore any bytes after the fields they know.
+Servers before the touchpad send no `features` byte; read it as 0. A server
+without Bluetooth sends no `bt_address`; phones paired before it existed
+learn it here. Clients ignore any bytes after the fields they know.
 
 Both sides then derive two 32-byte keys with HKDF-SHA256:
 
@@ -167,7 +172,8 @@ when over; the held set still repairs the state).
 Sending rules:
 
 - Send an INPUT immediately on every key press and release.
-- While any event is un-acknowledged, resend every 20 ms.
+- While any event is un-acknowledged, resend when its ACK is overdue:
+  after 1.5 × the smoothed ping + 2 ms, kept within 5–20 ms.
 - Otherwise send a heartbeat INPUT (no events) every 100 ms. The heartbeat
   keeps the phone's Wi-Fi radio out of power save and measures ping.
 
@@ -202,6 +208,34 @@ Sent unencrypted when a HELLO names a device id the server doesn't know
 (forgotten or never paired). Body: `reason 1` (1 = unknown device).
 Because it is not authenticated, the client only shows a "pair again" hint;
 it never deletes its pairing because of a REJECT.
+
+## Bluetooth
+
+When Wi-Fi can't reach the server, the same packets travel over Bluetooth
+Classic RFCOMM. The server registers an RFCOMM service with UUID
+`4f4b6579-6d61-4b79-9000-6f6d616b6579` (BlueZ assigns the channel; phones
+look it up over SDP) at the address from `b` or `bt_address`.
+
+- RFCOMM is a reliable stream, so each datagram is sent as a 2-byte
+  big-endian length followed by the datagram, in one write. A length of 0
+  or over 1200 closes the connection.
+- Everything inside is unchanged: HELLO, WELCOME, INPUT, ACK and BYE with
+  the same keys, nonces and counters. Bluetooth pairing and link encryption
+  are not needed and not relied on; the phone connects with an unauthenticated
+  ("insecure") socket.
+- The stream doesn't lose packets, so the client doesn't resend events. It
+  still sends the 100 ms heartbeat, for ping and the 500 ms stuck-key timeout.
+- A phone uses one transport at a time. It tries UDP first and adds
+  Bluetooth when no WELCOME has arrived after about 1.2 s, or when the
+  session in use goes quiet; the first transport to be welcomed is used and
+  the other stops.
+
+### Bluetooth keyboard mode
+
+Separately, the phone can be a standard Bluetooth HID keyboard and mouse
+for any computer, without omakeyd. That uses the HID Device profile and
+the computer's own Bluetooth pairing, and none of this protocol. Its
+report descriptor is in the Android app (`protocol/.../Hid.kt`).
 
 ## Test vectors
 

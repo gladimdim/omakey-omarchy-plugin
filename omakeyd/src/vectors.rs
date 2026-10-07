@@ -23,13 +23,14 @@ pub fn generate() -> serde_json::Value {
         port: 47800,
         device_id,
         key,
+        bt: None,
     };
 
     let mut client = Client::with_random(device_id, key, client_random);
     let hello = client.hello_with_nonce("Pixel 9", hello_nonce);
 
     let welcome_body =
-        Welcome { client_random, server_random, session_id, name: "omarchy desk".into(), features: FEATURE_POINTER }
+        Welcome { client_random, server_random, session_id, name: "omarchy desk".into(), features: FEATURE_POINTER, bt_address: None }
             .encode();
     let welcome = seal(
         &cipher(&key),
@@ -46,7 +47,7 @@ pub fn generate() -> serde_json::Value {
     let ack = seal(
         &cipher(&keys.s2c),
         &Header { kind: T_ACK, device_id, nonce: session_nonce(session_id, 1) },
-        &Ack { client_time_ms: 1016, last_eseq: 2 }.encode(),
+        &Ack { client_time_ms: 1016, last_eseq: 2, leds: None }.encode(),
     );
     // Left button down (event 3) with motion and a scroll in the same packet (counter 3).
     let input3 = {

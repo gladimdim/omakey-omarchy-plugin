@@ -19,11 +19,32 @@ pub fn config_dir() -> PathBuf {
         .join("omakey")
 }
 
-pub fn runtime_dir() -> PathBuf {
+/// $XDG_RUNTIME_DIR/omakey. There's no fallback to a shared place like
+/// /tmp, where another user could plant our socket or state file first.
+pub fn runtime_dir() -> Result<PathBuf, String> {
     std::env::var_os("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir)
-        .join("omakey")
+        .filter(|v| !v.is_empty())
+        .map(|v| PathBuf::from(v).join("omakey"))
+        .ok_or_else(|| "XDG_RUNTIME_DIR isn't set; run omakeyd inside your login session".into())
+}
+
+/// Create the runtime dir (mode 700) if needed, and check it is a real
+/// directory that only we can use.
+pub fn ensure_runtime_dir() -> Result<PathBuf, String> {
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+    let dir = runtime_dir()?;
+    match fs::DirBuilder::new().mode(0o700).create(&dir) {
+        Ok(()) => {}
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
+        Err(e) => return Err(format!("can't create {}: {e}", dir.display())),
+    }
+    let meta = fs::symlink_metadata(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    // SAFETY: getuid has no preconditions.
+    let uid = unsafe { libc::getuid() };
+    if !meta.is_dir() || meta.uid() != uid || meta.mode() & 0o077 != 0 {
+        return Err(format!("{} must be a directory owned by you with mode 700", dir.display()));
+    }
+    Ok(dir)
 }
 
 pub fn unix_now() -> u64 {
@@ -156,7 +177,7 @@ pub struct Devices {
 }
 
 impl Devices {
-    fn path() -> PathBuf {
+    pub fn path() -> PathBuf {
         config_dir().join("devices.json")
     }
 
@@ -165,10 +186,6 @@ impl Devices {
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok())
             .unwrap_or_default()
-    }
-
-    pub fn save(&self) -> io::Result<()> {
-        write_private(&Self::path(), &serde_json::to_vec_pretty(self)?)
     }
 
     pub fn find(&self, id: &DeviceId) -> Option<&Device> {
