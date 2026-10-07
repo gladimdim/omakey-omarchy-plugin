@@ -2,6 +2,9 @@
 
 **Your phone becomes a real keyboard for your Omarchy desktop.**
 
+**Website and live demo: <https://gladimdim.github.io/omakey-omarchy-plugin/>** ·
+Android app: [download the APK](https://github.com/gladimdim/omakey-mobile/releases/latest)
+
 Pair the Omakey phone app with a QR code and the desktop gets a new
 keyboard: Esc, F1–F12, Super, Ctrl, Alt, arrows, media keys, all of it.
 Hold `SUPER + SPACE`, `CTRL + SHIFT + T` or any chord with as many fingers
@@ -150,6 +153,10 @@ cd omakeyd && cargo test
 cargo run -- run --dry-run --port 47899   # prints keys instead of typing
 scripts/dev-sync                          # copy this checkout over the installed plugin
 ```
+
+The website lives in `docs/` (GitHub Pages, no build step). After the stock
+layouts change in the studio repo, run `scripts/site-layouts` to refresh
+`docs/assets/layouts.js`.
 
 `omakeyd test-client '<omakey://pair link>' --addr 127.0.0.1 --text "hi"`
 acts as a phone: it pairs, types the text, and prints the ping.
