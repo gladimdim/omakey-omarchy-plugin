@@ -323,7 +323,7 @@
       if (c === "uname") { out("Linux desk 6.17.2-arch1-1 x86_64 GNU/Linux"); return; }
       if (c === "omakeyd" && args[0] === "status") {
         const d = OMK.state.devices.filter((x) => x.online);
-        out("omakeyd 1.1.0 · running · UDP " + OMK.state.port + " · Bluetooth " + OMK.state.bluetooth, "k");
+        out("omakeyd 1.2.0 · running · UDP " + OMK.state.port + " · Bluetooth " + OMK.state.bluetooth, "k");
         d.forEach((x) => out("  ● " + x.name + "  " + (x.transport === "bluetooth" ? "Bluetooth" : "Wi-Fi " + x.addr) + " · ping " + x.ping + " ms · " + this.held.size + " held"));
         if (!d.length) out("  no phones connected", "m");
         return;
@@ -379,7 +379,7 @@
       w.out = w.node.querySelector(".tx");
       w.lines = [
         '<span class="m">$ journalctl --user -u omakeyd -f</span>',
-        '<span class="m">omakeyd[812]:</span> omakeyd 1.1.0 listening on UDP 47800, mDNS _omakey._udp',
+        '<span class="m">omakeyd[812]:</span> omakeyd 1.2.0 listening on UDP 47800, mDNS _omakey._udp',
         '<span class="m">omakeyd[812]:</span> virtual devices: "Omakey Keyboard", "Omakey Mouse"',
         '<span class="m">omakeyd[812]:</span> Bluetooth RFCOMM ready',
         '<span class="m">omakeyd[812]:</span> <span class="p">Pixel 9 Pro connected</span> over Wi-Fi 192.168.1.42 (session 7f3a)',

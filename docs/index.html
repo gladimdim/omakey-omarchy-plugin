@@ -52,7 +52,7 @@
 <main id="top">
   <section class="hero">
     <div class="wrap">
-      <a class="badge" href="#download"><b>1.1</b>Free and open source · Android + Omarchy</a>
+      <a class="badge" href="#download"><b>1.2</b>Free and open source · Android + Omarchy + Steam Deck</a>
       <h1>Your phone is the keyboard.<br><span class="grad">A real one.</span></h1>
       <p class="lede">Omakey turns your phone into a kernel-level keyboard and touchpad for Omarchy. Hold <span class="kbd">SUPER</span> <span class="kbd">SPACE</span>, press Esc and F1–F12, type into the lock screen — over encrypted Wi-Fi or Bluetooth.</p>
       <div class="cta">
@@ -345,14 +345,14 @@
 
   <section class="center reveal-up" id="download">
     <div class="wrap">
-      <p class="eyebrow">Get Omakey 1.1</p>
+      <p class="eyebrow">Get Omakey 1.2</p>
       <h2>Two minutes to your first keystroke.</h2>
       <p class="sub">Free to use, share and redistribute. The APK is signed with the same key for every release, so updates install over each other.</p>
       <div class="get">
         <div>
-          <h3>Android app <span class="ver">1.1.0</span></h3>
-          <p>Android 10 or newer. The keyboard, touchpad, portrait mode with your own keyboard, layouts and Bluetooth keyboard mode.</p>
-          <a class="btn primary" style="align-self:flex-start" href="https://github.com/gladimdim/omakey-mobile/releases/download/v1.1.0/omakey-1.1.0.apk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>Download omakey-1.1.0.apk</a>
+          <h3>Android app <span class="ver">1.2.0</span></h3>
+          <p>Android 10 or newer. The keyboard, touchpad, portrait mode with your own keyboard, Copy and Paste with the computer's clipboard, layouts and Bluetooth keyboard mode.</p>
+          <a class="btn primary" style="align-self:flex-start" href="https://github.com/gladimdim/omakey-mobile/releases/download/v1.2.0/omakey-1.2.0.apk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>Download omakey-1.2.0.apk</a>
           <ol>
             <li>Open the APK on your phone and allow <b>Install unknown apps</b> for your browser or file manager.</li>
             <li>Open Omakey, tap <b>Scan QR code</b>.</li>
@@ -361,7 +361,7 @@
           <div class="meta"><b>Signing certificate SHA-256</b><br>8B:E4:25:A4:31:79:FB:FB:08:C2:31:3F:4B:C3:0C:26:F7:55:CA:44:BC:C7:22:EE:96:31:A6:77:45:B7:2D:36<br><a href="https://github.com/gladimdim/omakey-mobile/releases">All releases and checksums →</a></div>
         </div>
         <div id="install">
-          <h3>Omarchy plugin <span class="ver">1.1.0</span></h3>
+          <h3>Omarchy plugin <span class="ver">1.2.0</span></h3>
           <p>The <code>omakeyd</code> service and the bar widget. Needs the Omarchy shell and Rust (<code>sudo pacman -S rust</code>).</p>
           <div class="cmd"><code id="cmd-add">omarchy plugin add https://github.com/gladimdim/omakey-omarchy-plugin --enable</code><button type="button" data-copy="cmd-add">Copy</button></div>
           <div class="cmd"><code id="cmd-install">~/.config/omarchy/plugins/gladimdim.omakey/install.sh</code><button type="button" data-copy="cmd-install">Copy</button></div>
@@ -371,6 +371,9 @@
             <li>Scan it with the app. Type.</li>
           </ol>
           <div class="meta">Or from a terminal: <b>omakeyd pair</b>. Uninstall: <b>install.sh --uninstall</b>.<br><a href="https://github.com/gladimdim/omakey-omarchy-plugin/releases">Plugin releases →</a></div>
+          <h3 style="margin-top:28px">Steam Deck with SteamOS</h3>
+          <p>No Omarchy, sudo or compiler needed. In Desktop Mode, run this in Konsole, then open <b>Omakey: pair a phone</b>. Works in Game Mode too.</p>
+          <div class="cmd"><code id="cmd-steamos">curl -fsSL https://raw.githubusercontent.com/gladimdim/omakey-omarchy-plugin/main/install-steamos.sh | bash</code><button type="button" data-copy="cmd-steamos">Copy</button></div>
         </div>
       </div>
     </div>
