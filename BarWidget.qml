@@ -280,7 +280,8 @@ Panel {
     bar: root.bar
     iconComponent: Component {
       OmakeyIcon {
-        color: button.active && button.useActiveColor ? button.activeColor : button.foreground
+        color: button.foreground
+        lit: root.connected > 0
       }
     }
     active: root.connected > 0

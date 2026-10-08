@@ -1,41 +1,40 @@
 import QtQuick
 import QtQuick.Shapes
 
-// Shared with the Android launcher icon, with colors supplied by the bar.
+// The Android launcher icon: the gradient keycap and arrow from
+// OmakeyIcon.svg, and the signal waves, in mint while [lit] (a phone is
+// connected) and in [color] otherwise.
 Item {
   id: root
   property color color: "white"
+  property bool lit: true
   implicitWidth: 24
   implicitHeight: 24
+
+  readonly property real side: Math.min(width, height)
+
+  Image {
+    anchors.centerIn: parent
+    width: root.side
+    height: root.side
+    source: Qt.resolvedUrl("OmakeyIcon.svg")
+    // Rasterized at the size shown, and again for HiDPI, so it stays crisp.
+    sourceSize.width: Math.ceil(root.side * 2)
+    sourceSize.height: Math.ceil(root.side * 2)
+    smooth: true
+    mipmap: true
+  }
 
   Shape {
     width: 24
     height: 24
     anchors.centerIn: parent
-    scale: Math.min(root.width, root.height) / 24
+    scale: root.side / 24
     preferredRendererType: Shape.CurveRenderer
 
     ShapePath {
       fillColor: "transparent"
-      strokeColor: root.color
-      strokeWidth: 2
-      capStyle: ShapePath.RoundCap
-      joinStyle: ShapePath.RoundJoin
-      PathSvg { path: "M11.5,4 H7 C4.79,4 3,5.79 3,8 V17 C3,19.21 4.79,21 7,21 H16 C18.21,21 20,19.21 20,17 V13" }
-    }
-
-    ShapePath {
-      fillColor: "transparent"
-      strokeColor: root.color
-      strokeWidth: 2
-      capStyle: ShapePath.RoundCap
-      joinStyle: ShapePath.RoundJoin
-      PathSvg { path: "M15,11.5 V14.5 H8 M10.5,12 L8,14.5 L10.5,17" }
-    }
-
-    ShapePath {
-      fillColor: "transparent"
-      strokeColor: root.color
+      strokeColor: root.lit ? "#B2FFE0" : root.color
       strokeWidth: 2
       capStyle: ShapePath.RoundCap
       PathSvg { path: "M16,3 C19.31,3 22,5.69 22,9 M16,7 C17.1,7 18,7.9 18,9" }
