@@ -649,3 +649,13 @@ fn clip_needs_a_session_in_use_and_a_clipboard() {
     // No clipboard on this server: failed, not silence.
     assert_eq!(r.clip(Clip { op: CLIP_GET, clip_id: 1, ..Default::default() }).unwrap().status, CLIP_FAILED);
 }
+
+#[test]
+fn copy_without_a_reachable_clipboard_still_presses_ctrl_insert_and_fails_fast() {
+    let (mut r, fake) = Rig::with_clipboard();
+    fake.reads.lock().unwrap().push_back(Err(crate::clipboard::ClipError::Failed));
+    let t = Instant::now();
+    assert_eq!(r.get(4, CLIP_COPY), Err(CLIP_FAILED));
+    assert!(t.elapsed() < Duration::from_millis(500), "no waiting for a change that can't be seen");
+    assert_eq!(r.rec.take(), vec![(CTRL, true), (INSERT, true), (INSERT, false), (CTRL, false)]);
+}

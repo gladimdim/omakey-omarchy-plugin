@@ -1,7 +1,9 @@
-//! The desktop clipboard for phones (PROTOCOL.md, CLIP). Reading and
-//! setting it means running wl-paste and wl-copy, which can take a while
-//! (the app that owns the clipboard serves it), so a worker thread does it
-//! and the server picks up the results on its tick: no key ever waits.
+//! The desktop clipboard for phones (PROTOCOL.md, CLIP): wl-copy and
+//! wl-paste on a Wayland desktop (Omarchy), KDE's Klipper over D-Bus where
+//! there's none (SteamOS's Desktop Mode, which is X11). Either can take a
+//! while (the app that owns the clipboard serves it), so a worker thread
+//! does it and the server picks up the results on its tick: no key ever
+//! waits.
 
 use crate::protocol::MAX_CLIP;
 use std::io::{Read, Write};
@@ -82,7 +84,15 @@ impl Clipboard {
                             }
                             Done::Read { tag, contents }
                         }
-                        Job::Write { tag, text } => Done::Write { tag, ok: backend.write(&text) },
+                        Job::Write { tag, text } => {
+                            let ok = backend.write(&text);
+                            // A paste follows at once: make sure the clipboard serves the new text.
+                            let deadline = Instant::now() + SET_WAIT;
+                            while ok && backend.read().map(|t| t.bytes) != Ok(text.bytes.clone()) && Instant::now() < deadline {
+                                std::thread::sleep(Duration::from_millis(20));
+                            }
+                            Done::Write { tag, ok }
+                        }
                     };
                     if done_tx.send(done).is_err() {
                         return;
@@ -101,6 +111,96 @@ impl Clipboard {
     pub fn poll(&self) -> Option<Done> {
         self.done.try_recv().ok()
     }
+}
+
+/// Whichever clipboard the desktop has, looked up on each use: the
+/// session can change under a running service (SteamOS switches between
+/// Game Mode and Desktop Mode).
+pub struct DesktopClipboard {
+    klipper: Klipper,
+}
+
+impl DesktopClipboard {
+    /// There's a clipboard to try: wl-clipboard is installed, or there's a
+    /// D-Bus session where Klipper may be. Without, phones aren't told of a
+    /// clipboard and press the copy and paste keys instead.
+    pub fn available() -> bool {
+        WlClipboard::available() || session_bus()
+    }
+
+    pub fn new() -> DesktopClipboard {
+        DesktopClipboard { klipper: Klipper { conn: None } }
+    }
+
+    fn wayland() -> bool {
+        WlClipboard::available() && (std::env::var_os("WAYLAND_DISPLAY").is_some() || wayland_display().is_some())
+    }
+}
+
+impl Backend for DesktopClipboard {
+    fn read(&mut self) -> Contents {
+        if Self::wayland() {
+            WlClipboard.read()
+        } else {
+            self.klipper.read()
+        }
+    }
+
+    fn write(&mut self, text: &Text) -> bool {
+        if Self::wayland() {
+            WlClipboard.write(text)
+        } else {
+            self.klipper.write(text)
+        }
+    }
+}
+
+/// KDE's clipboard (Plasma's Klipper) over the D-Bus session bus.
+struct Klipper {
+    conn: Option<zbus::blocking::Connection>,
+}
+
+impl Klipper {
+    fn call<R: serde::de::DeserializeOwned + zbus::zvariant::Type>(
+        &mut self,
+        method: &str,
+        body: &(impl serde::Serialize + zbus::zvariant::DynamicType),
+    ) -> Option<R> {
+        // Connect on first use, and again after a failure (a new session).
+        for _ in 0..2 {
+            if self.conn.is_none() {
+                self.conn = zbus::blocking::Connection::session().ok();
+            }
+            let conn = self.conn.as_ref()?;
+            match conn.call_method(Some("org.kde.klipper"), "/klipper", Some("org.kde.klipper.klipper"), method, body) {
+                Ok(reply) => return reply.body().deserialize::<R>().ok(),
+                // No Klipper on the bus (Game Mode, another desktop): nothing to retry.
+                Err(zbus::Error::MethodError(..)) => return None,
+                Err(_) => self.conn = None,
+            }
+        }
+        None
+    }
+
+    fn read(&mut self) -> Contents {
+        let text: String = self.call("getClipboardContents", &()).ok_or(ClipError::Failed)?;
+        match text.len() {
+            0 => Err(ClipError::Empty),
+            n if n > MAX_CLIP => Err(ClipError::TooLarge),
+            _ => Ok(Text { bytes: text.into_bytes(), sensitive: false }),
+        }
+    }
+
+    fn write(&mut self, text: &Text) -> bool {
+        let Ok(s) = std::str::from_utf8(&text.bytes) else { return false };
+        self.call::<()>("setClipboardContents", &(s,)).is_some()
+    }
+}
+
+/// A D-Bus session bus to ask: from the environment, else the usual socket.
+fn session_bus() -> bool {
+    std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_some()
+        || std::env::var_os("XDG_RUNTIME_DIR").is_some_and(|d| PathBuf::from(d).join("bus").exists())
 }
 
 /// The Wayland clipboard through wl-clipboard's wl-copy and wl-paste.
@@ -153,15 +253,7 @@ impl Backend for WlClipboard {
             return false;
         };
         let wrote = child.stdin.take().is_some_and(|mut i| i.write_all(&text.bytes).is_ok());
-        if !(wait(&mut child).is_some_and(|s| s.success()) && wrote) {
-            return false;
-        }
-        // A paste follows at once: make sure the clipboard serves the new text.
-        let deadline = Instant::now() + SET_WAIT;
-        while self.read().map(|t| t.bytes) != Ok(text.bytes.clone()) && Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        true
+        wait(&mut child).is_some_and(|s| s.success()) && wrote
     }
 }
 

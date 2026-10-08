@@ -1,0 +1,49 @@
+# Attach the SteamOS build to each release: a static omakeyd (musl, so any
+# glibc will do), its checksum, and the service file. install-steamos.sh
+# downloads these from the latest release.
+name: Release binaries
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build and attach to (e.g. v1.2.0)
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  steamos:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Rust with the musl target
+        run: |
+          rustup toolchain install stable --profile minimal --target x86_64-unknown-linux-musl
+          rustup default stable
+
+      - name: Test
+        working-directory: omakeyd
+        run: cargo test --locked
+
+      - name: Build
+        working-directory: omakeyd
+        run: cargo build --release --locked --target x86_64-unknown-linux-musl
+
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir dist
+          cp omakeyd/target/x86_64-unknown-linux-musl/release/omakeyd dist/omakeyd-x86_64-linux-musl
+          cp packaging/omakeyd.service.in dist/
+          (cd dist && sha256sum omakeyd-x86_64-linux-musl > omakeyd-x86_64-linux-musl.sha256)
+          gh release upload "$TAG" dist/* --clobber

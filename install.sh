@@ -22,6 +22,11 @@ MODULES="/etc/modules-load.d/omakey.conf"
 UNIT="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/omakeyd.service"
 PORT=47800
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# SteamOS: read-only system, no compiler, no sudo by default. Its own
+# installer takes the release's static build and needs no root.
+if grep -qs '^ID=steamos' /etc/os-release; then
+  exec "$ROOT/install-steamos.sh" "$@"
+fi
 # Build outside the plugin folder: the shell watches that folder and would
 # reload plugins on every file cargo writes.
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/omakey/target}"

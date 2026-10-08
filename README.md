@@ -36,7 +36,7 @@ as you like, just as on a Bluetooth keyboard, but over Wi-Fi.
 - **Shared clipboard.** Copy on the phone copies what's selected on the
   desktop and puts it on the phone's clipboard too; Paste pastes on the
   desktop, bringing the phone's clipboard along when it has something newer.
-  Needs `wl-copy` and `wl-paste` (Omarchy has them).
+  Needs `wl-copy` and `wl-paste` (Omarchy has them), or KDE's clipboard.
 
 The app can also be a plain Bluetooth keyboard for computers without
 `omakeyd`: pair the phone in that computer's Bluetooth settings.
@@ -63,6 +63,31 @@ omarchy plugin add https://github.com/gladimdim/omakey-omarchy-plugin --enable
 
 If the service doesn't start right after installing, log out and back in
 once so the udev rule applies to your session.
+
+### Steam Deck with SteamOS
+
+`omakeyd` runs on a stock Steam Deck too, no Omarchy needed, in Game Mode
+and Desktop Mode. In Desktop Mode, open Konsole and run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/gladimdim/omakey-omarchy-plugin/main/install-steamos.sh | bash
+```
+
+It needs no sudo and no compiler: it downloads the static `omakeyd` from the
+latest release, checks its checksum, and puts everything in your home
+folder, where SteamOS updates leave it alone (`~/.local/bin/omakeyd` and a
+user service). Steam's own controller rule already lets you create the
+virtual keyboard; if a Deck lacks it, the installer prints the one root
+command to add it. To pair, open **Omakey: pair a phone** from the app menu
+or, after the installer adds it, from Steam's Non-Steam library in Game
+Mode: it shows the QR code in Konsole. `omakeyd pair`, `status`, `devices`
+and `forget` work there as on Omarchy (`~/.local/bin/omakeyd`).
+
+What differs from Omarchy: there's no bar widget, the phone doesn't follow a
+desktop theme, and the phone's keyboard layout doesn't switch the Deck's.
+The shared clipboard works in Desktop Mode (through KDE's clipboard); in
+Game Mode Copy and Paste press the keys. Remove it with
+`... install-steamos.sh | bash -s -- --uninstall`.
 
 ## The bar widget
 
@@ -127,6 +152,9 @@ phone ──UDP 47800, AES-GCM──▶ omakeyd ──▶ /dev/uinput ──▶ 
   implementation must reproduce.
 - `omakeyd/`: the Rust daemon. `cargo test` runs the protocol tests: chords,
   lost and replayed packets, stuck-key timeout, two phones.
+- Publishing a GitHub release runs `.github/workflows/release.yml`, which
+  attaches the static SteamOS build (`omakeyd-x86_64-linux-musl`, its
+  `.sha256`, and `omakeyd.service.in`) that `install-steamos.sh` downloads.
 - `BarWidget.qml`: the bar widget. It reads `$XDG_RUNTIME_DIR/omakey/state.json`
   and calls the CLI, so it works with any bar and the keyboard keeps working
   across `omarchy restart shell`.

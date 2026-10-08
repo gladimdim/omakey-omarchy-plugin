@@ -331,7 +331,10 @@ without progress. A transfer doesn't survive a new session: the phone
 starts it again or gives up. A server answers `unknown transfer` to a put
 that starts past offset 0 under an id it doesn't have.
 
-On Omarchy the server uses `wl-copy` and `wl-paste`.
+On Omarchy the server uses `wl-copy` and `wl-paste`; without a Wayland
+desktop (SteamOS's Desktop Mode is X11) it asks KDE's Klipper over D-Bus.
+Where there's no clipboard at all (SteamOS's Game Mode) a get with the copy
+flag still presses Ctrl+Insert and answers `failed`.
 
 ## Bluetooth
 

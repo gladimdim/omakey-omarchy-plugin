@@ -2,7 +2,7 @@
 
 use crate::bluetooth;
 use crate::client::PairInfo;
-use crate::clipboard::{Clipboard, WlClipboard};
+use crate::clipboard::{Clipboard, DesktopClipboard};
 use crate::keyboard::{Keyboard, KeySink, LogSink, Uinput};
 use crate::net::UdpServer;
 use crate::notify::Notifier;
@@ -101,10 +101,10 @@ pub fn run(port_override: Option<u16>, dry_run: bool) -> Result<(), String> {
     if !dry_run {
         let mut srv = server.lock().unwrap();
         srv.layout = Some(KeyboardLayout::new());
-        if WlClipboard::available() {
-            srv.clipboard = Some(Clipboard::start(Box::new(WlClipboard)));
+        if DesktopClipboard::available() {
+            srv.clipboard = Some(Clipboard::start(Box::new(DesktopClipboard::new())));
         } else {
-            eprintln!("omakeyd: wl-copy or wl-paste not found; phones can't use the clipboard");
+            eprintln!("omakeyd: no clipboard to reach (no wl-copy/wl-paste or D-Bus session); phones press copy and paste instead");
         }
     }
     let bluetooth = bluetooth::start(server.clone(), shared.clone());

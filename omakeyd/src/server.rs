@@ -674,8 +674,14 @@ impl Server {
             t.state = match (std::mem::replace(&mut t.state, ClipState::Reading), result) {
                 (ClipState::Before, Ok(before)) => {
                     tap(kb, KEY_LEFTCTRL, KEY_INSERT);
-                    self.clipboard.as_ref().unwrap().submit(Job::Read { tag: (sid, id), changed_from: Some(before) });
-                    ClipState::Reading
+                    if before == Err(ClipError::Failed) {
+                        // No clipboard to read (SteamOS's Game Mode): the copy
+                        // happened on the desktop, there's nothing to send.
+                        read_done(before)
+                    } else {
+                        self.clipboard.as_ref().unwrap().submit(Job::Read { tag: (sid, id), changed_from: Some(before) });
+                        ClipState::Reading
+                    }
                 }
                 (ClipState::Reading, Ok(contents)) => read_done(contents),
                 (ClipState::Writing { total, paste }, Err(ok)) => {
