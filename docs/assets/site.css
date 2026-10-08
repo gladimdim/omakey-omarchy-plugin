@@ -268,7 +268,7 @@ footer a { color: var(--muted); }
 /* The touchpad panel slides over the keys. */
 .tp-panel { position: absolute; inset: 0; background: var(--p-bg); transform: translateY(-101%); transition: transform .32s cubic-bezier(.2, .8, .2, 1); display: flex; flex-direction: column; z-index: 2; }
 .phone.pad-open .tp-panel { transform: none; }
-.tp-main { flex: 1; display: flex; gap: 1.2%; padding: 1.2% 1.4% 0; min-height: 0; }
+.tp-main { flex: 1; display: flex; gap: 1.2%; padding: 0 1.4% 1.2%; min-height: 0; }
 .tp-col { width: 11%; display: flex; flex-direction: column; gap: 4%; }
 .tp-col button {
   flex: 1; border: 0; border-radius: 10px; background: var(--p-mod); color: var(--p-fg); font: 600 clamp(7px, .9vw, 11px)/1.1 var(--sans);
@@ -282,7 +282,8 @@ footer a { color: var(--muted); }
 }
 .tp-pad .hint { position: absolute; left: 0; right: 0; top: 36%; text-align: center; font: 500 clamp(8px, 1vw, 12px)/1.6 var(--sans); color: var(--p-dim); pointer-events: none; }
 .tp-pad .dot { position: absolute; width: 34px; height: 34px; margin: -17px; border-radius: 50%; background: rgba(122, 162, 247, .28); border: 1px solid rgba(122, 162, 247, .6); pointer-events: none; transition: opacity .25s; }
-.tp-strip { flex: none; height: 16%; display: flex; align-items: center; justify-content: center; gap: 2%; padding: 0 3%; font: 500 clamp(7px, .9vw, 11px)/1 var(--sans); color: var(--p-dim); }
+/* Pointer speed along the top, as in the app. */
+.tp-strip { order: -1; flex: none; height: 16%; display: flex; align-items: center; justify-content: center; gap: 2%; padding: 0 3%; font: 500 clamp(7px, .9vw, 11px)/1 var(--sans); color: var(--p-dim); }
 .tp-strip input { width: 26%; accent-color: var(--p-accent); }
 .tp-chip { font: 700 clamp(7px, .95vw, 11px)/1 var(--sans); color: var(--p-fg); background: var(--p-surface); border: 0; padding: .6em 1em; border-radius: 999px; cursor: pointer; white-space: nowrap; }
 
@@ -745,7 +746,7 @@ footer a { color: var(--muted); }
 .pp-ticker span.sc { color: var(--p-layer); }
 .pp-stage { position: relative; flex: 1; min-height: 0; overflow: hidden; }
 .tp-panel.compact { transform: none; }
-.tp-panel.compact .tp-main { padding: 1.5cqw 2cqw 0; gap: 1.6cqw; }
+.tp-panel.compact .tp-main { padding: 0 2cqw 1.5cqw; gap: 1.6cqw; }
 .tp-panel.compact .tp-col { width: 17%; gap: 1.6cqw; }
 .tp-panel.compact .tp-col button { font-size: 2.6cqw; border-radius: 2.6cqw; padding-bottom: 1.6cqw; gap: .8cqw; }
 .tp-panel.compact .tp-col button b { font-size: 5cqw; line-height: 1; opacity: .8; }
