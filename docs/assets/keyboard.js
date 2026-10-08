@@ -354,9 +354,9 @@
         '<div class="cam"></div><div class="screen">' +
         '<div class="kb-top"><span class="kb-pill"><i>●</i><span class="pt"></span></span><span class="kb-spacer"></span>' +
         (this.o.touchpad ? '<button class="kb-handle" type="button" aria-label="Touchpad: tap to open">⌄  touchpad</button>' : "") +
-        '<button class="kb-btn opt sticky" type="button">⇧ Sticky</button>' +
-        '<button class="kb-btn opt" type="button" data-act="pc">⇄ PC</button>' +
-        '<button class="kb-btn layout" type="button">⌨ Layout</button></div>' +
+        '<button class="kb-btn opt sticky" type="button" aria-label="Sticky keys">⇧</button>' +
+        '<button class="kb-btn opt" type="button" data-act="pc" aria-label="Switch computer">⇄</button>' +
+        '<button class="kb-btn layout" type="button" aria-label="Switch layout">⌨</button></div>' +
         '<div class="kb-stage"></div></div>';
       this.root = root;
       this.stage = root.querySelector(".kb-stage");
@@ -369,7 +369,6 @@
       const st = root.querySelector(".sticky");
       st.addEventListener("click", () => {
         this.kb.setSticky(!this.kb.sticky);
-        st.textContent = this.kb.sticky ? "⇧ Sticky ●" : "⇧ Sticky";
         st.classList.toggle("on", this.kb.sticky);
       });
       const lb = root.querySelector(".layout");

@@ -634,7 +634,7 @@
         '<div class="screen"><i class="pp-cam"></i>' +
         '<div class="pp-top"><button type="button" class="kb-btn" data-a="show" aria-label="Show the keyboard">⌨</button>' +
         '<span class="pp-status"><span class="kb-pill"><i>●</i><span class="pt"></span></span></span>' +
-        '<button type="button" class="kb-btn" data-a="pc">⇄ PC</button><button type="button" class="kb-btn" data-a="layout">⌨ Layout</button></div>' +
+        '<button type="button" class="kb-btn" data-a="pc" aria-label="Switch computer">⇄</button><button type="button" class="kb-btn" data-a="layout" aria-label="Switch layout">⌨</button></div>' +
         '<div class="pp-ticker"></div><div class="pp-stage"></div><div class="pp-strip"></div>' +
         '<div class="pp-kb"><div class="pp-reopen" role="button" tabindex="0"><b>⌨</b><span>Tap to open the keyboard</span></div></div>' +
         '<div class="pp-nav"><button type="button" data-a="hide" aria-label="Hide the keyboard">⌄</button><i></i><span></span></div></div>';
