@@ -93,9 +93,13 @@ packet's type and device id cannot be changed in flight.
 | 4    | ACK     | s → c     | `Ksc` | session id ‖ server counter   |
 | 5    | BYE     | c → s     | `Kcs` | session id ‖ client counter   |
 | 6    | REJECT  | s → c     | none  | zeros; body is plaintext      |
+| 7    | CLIP    | c → s     | `Kcs` | session id ‖ client counter   |
+| 8    | CLIP_REPLY | s → c  | `Ksc` | session id ‖ server counter   |
 
-For types 3-5 the nonce is the 4-byte session id followed by an 8-byte
-counter. Each side starts its counter at 1 and adds 1 per packet it sends.
+For types 3-5, 7 and 8 the nonce is the 4-byte session id followed by an 8-byte
+counter. Each side starts its counter at 1 and adds 1 per packet it sends; CLIP
+shares the client's counter with INPUT and BYE, CLIP_REPLY the server's
+with ACK.
 
 ### HELLO (1) — start a session
 
@@ -118,7 +122,8 @@ server_random   16
 session_id       4
 name_len         1
 name             name_len   UTF-8 host name
-features         1          optional; bit 0 = touchpad (pointer) support
+features         1          optional; bit 0 = touchpad (pointer) support,
+                            bit 1 = clipboard (CLIP)
 bt_address       6          optional; the server's Bluetooth adapter
 ```
 
@@ -268,6 +273,66 @@ Because it is not authenticated, the client only shows a "pair again" hint;
 it never deletes its pairing because of a REJECT.
 It also only believes a REJECT from an address it sent HELLO to.
 
+### CLIP (7) and CLIP_REPLY (8) — the clipboard
+
+Text goes between the phone's clipboard and the desktop's. The phone asks
+and the server answers each CLIP with one CLIP_REPLY, so the server never
+sends anything unasked. Only servers whose WELCOME sets the clipboard
+feature bit take CLIP; others drop it, as they drop any unknown type.
+
+```
+CLIP (c → s)
+op               1    1 = put (phone to desktop), 2 = get (desktop to phone)
+clip_id          4    chosen by the phone, new for each transfer
+offset           4    put: where `data` starts; get: the first byte wanted
+flags            1    put: bit 0 = paste once set, bit 1 = sensitive
+                      get: bit 0 = copy first
+total            4    put: the whole text's length in bytes; get: 0
+data             n    put: the text's bytes from `offset`, at most 1024
+
+CLIP_REPLY (s → c)
+op               1    echoed
+clip_id          4    echoed
+status           1    0 = ok, 1 = working (ask again), 2 = empty (no text),
+                      3 = too large, 4 = failed, 5 = unknown transfer
+offset           4    put: the bytes the server has; get: where `data` starts
+flags            1    get: bit 1 = sensitive
+total            4    put: echoed; get: the whole text's length in bytes
+data             n    get: the text's bytes from `offset`, at most 1024
+```
+
+The text is UTF-8, at most 65536 bytes. A session has one transfer at a
+time: a CLIP with a new `clip_id` replaces the one before. The server takes
+CLIP only from a session that has sent an INPUT.
+
+**Put.** The phone sends the text in order, 1024 bytes per CLIP, starting
+at offset 0, and sends the next piece when the reply's `offset` says the
+server has the previous one. The server keeps only a piece that starts
+exactly where its bytes end and answers every CLIP with how many it has.
+With all `total` bytes in, it sets the desktop clipboard, and with the
+paste flag then presses Shift+Insert (paste, in terminals too); until
+that is done it answers `working`. The put is done when a reply says `ok`
+with `offset` = `total`. A sensitive text is offered with the hint
+password managers use, so clipboard managers skip it.
+
+**Get.** The phone asks for offset 0, then for the next byte it lacks. The
+server reads the clipboard's text when a new `clip_id` arrives and answers
+`working` until it has it. With the copy flag it first presses Ctrl+Insert
+(copy) and waits until the clipboard changes, at most 1 s, so the reply has
+what is selected on the desktop. Then each reply has up to 1024 bytes from
+the asked `offset`, the `total`, and the sensitive flag if the desktop's
+clipboard carries the password managers' hint. `empty` means the clipboard
+has no text, `too large` more than 65536 bytes, `failed` that the server
+can't reach the clipboard.
+
+The phone resends its last CLIP when no reply came within 150 ms, asks
+again every 50 ms while the reply says `working`, and gives up after 5 s
+without progress. A transfer doesn't survive a new session: the phone
+starts it again or gives up. A server answers `unknown transfer` to a put
+that starts past offset 0 under an id it doesn't have.
+
+On Omarchy the server uses `wl-copy` and `wl-paste`.
+
 ## Bluetooth
 
 When Wi-Fi can't reach the server, the same packets travel over Bluetooth
@@ -321,7 +386,8 @@ report descriptor is in the Android app (`protocol/.../Hid.kt`).
 randoms and nonces and the exact datagrams they produce: HELLO, WELCOME
 (with the touchpad feature), two INPUTs (SUPER down, then SPACE down with
 both events un-acked), an INPUT with the left button held and a pointer
-trailer, ACK (without the `leds` byte) and BYE. Every implementation must
+trailer, ACK (without the `leds` byte) and BYE; then, in a session of its
+own after the same WELCOME, a CLIP put that pastes and its CLIP_REPLY. Every implementation must
 reproduce them byte for byte. The fingerprint of their device key is
 `630D-CD29`.
 

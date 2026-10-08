@@ -102,6 +102,7 @@ pub enum Reply {
     Welcome { host_name: String },
     Ack { client_time_ms: u32, last_eseq: u16, leds: Option<u8>, theme: Option<Theme> },
     Reject(u8),
+    Clip(Clip),
 }
 
 struct Live {
@@ -196,8 +197,26 @@ impl Client {
                 }
                 Some(Reply::Ack { client_time_ms: ack.client_time_ms, last_eseq: ack.last_eseq, leds: ack.leds, theme })
             }
+            T_CLIP_REPLY => {
+                let live = self.live.as_mut()?;
+                let (sid, counter) = header.session_counter();
+                if sid != live.session_id || counter <= live.max_server_counter {
+                    return None;
+                }
+                let clip = Clip::decode(&open(&live.s2c, pkt)?, true)?;
+                live.max_server_counter = counter;
+                Some(Reply::Clip(clip))
+            }
             _ => None,
         }
+    }
+
+    /// A CLIP packet (PROTOCOL.md): one piece of a put, or a get.
+    pub fn clip(&mut self, clip: &Clip) -> Option<Vec<u8>> {
+        let live = self.live.as_ref()?;
+        self.counter += 1;
+        let h = Header { kind: T_CLIP, device_id: self.device_id, nonce: session_nonce(live.session_id, self.counter) };
+        Some(seal(&live.c2s, &h, &clip.encode(false)))
     }
 
     /// Record a key change; returns the INPUT packet to send right away.

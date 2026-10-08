@@ -2,6 +2,7 @@
 
 use crate::bluetooth;
 use crate::client::PairInfo;
+use crate::clipboard::{Clipboard, WlClipboard};
 use crate::keyboard::{Keyboard, KeySink, LogSink, Uinput};
 use crate::net::UdpServer;
 use crate::notify::Notifier;
@@ -95,9 +96,16 @@ pub fn run(port_override: Option<u16>, dry_run: bool) -> Result<(), String> {
     // Shared with the Bluetooth connection threads; the UDP loop below holds
     // it only while handling one packet.
     let server = Arc::new(Mutex::new(Server::new(shared.clone(), Keyboard::new(sink), host_name.clone())));
-    // A real keyboard only: a dry run has no device for Hyprland to switch.
+    // A real keyboard only: a dry run has no device for Hyprland to switch,
+    // and only prints the keys a copy or paste would press.
     if !dry_run {
-        server.lock().unwrap().layout = Some(KeyboardLayout::new());
+        let mut srv = server.lock().unwrap();
+        srv.layout = Some(KeyboardLayout::new());
+        if WlClipboard::available() {
+            srv.clipboard = Some(Clipboard::start(Box::new(WlClipboard)));
+        } else {
+            eprintln!("omakeyd: wl-copy or wl-paste not found; phones can't use the clipboard");
+        }
     }
     let bluetooth = bluetooth::start(server.clone(), shared.clone());
     let ctx = Arc::new(Context {

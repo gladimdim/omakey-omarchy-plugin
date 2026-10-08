@@ -1,6 +1,7 @@
 //! Session state machine. No sockets here: `handle` takes a datagram and
 //! returns the reply, so the whole protocol is unit-testable.
 
+use crate::clipboard::{ClipError, Clipboard, Contents, Done, Job, Text};
 use crate::hypr::KeyboardLayout;
 use crate::keyboard::{allowed, is_modifier, Keyboard};
 use crate::protocol::*;
@@ -26,6 +27,9 @@ const THEME_REPEATS: u8 = 4;
 /// HELLOs per source IP: a token bucket of this rate and burst.
 const HELLO_RATE: f32 = 10.0;
 const HELLO_BURST: f32 = 20.0;
+const KEY_LEFTCTRL: u16 = 29;
+const KEY_LEFTSHIFT: u16 = 42;
+const KEY_INSERT: u16 = 110;
 
 pub struct Pending {
     pub device_id: DeviceId,
@@ -170,6 +174,28 @@ struct Session {
     /// ACKs that still carry the desktop theme: the first few of a
     /// session, and again after the theme changes.
     theme_left: u8,
+    /// The clipboard transfer under way or last finished (PROTOCOL.md, CLIP).
+    clip: Option<Transfer>,
+}
+
+/// One clipboard transfer: its id and where it is.
+struct Transfer {
+    id: u32,
+    op: u8,
+    state: ClipState,
+}
+
+enum ClipState {
+    /// Put: the text so far, until it has `total` bytes.
+    Receiving { buf: Vec<u8>, total: u32, flags: u8 },
+    /// Put: the clipboard is being set, then pasted with `paste`.
+    Writing { total: u32, paste: bool },
+    /// Get with copy first: what the clipboard had before Ctrl+Insert.
+    Before,
+    /// Get: the clipboard is being read.
+    Reading,
+    /// Finished: the status, and for a get the text.
+    Done { status: u8, total: u32, text: Option<Text> },
 }
 
 pub const LOSS_WINDOW: usize = 256;
@@ -259,6 +285,8 @@ pub struct Server {
     /// Switches the keyboard's layout when a phone asks (INPUT `layout`);
     /// None in tests and where there's no Hyprland to ask.
     pub layout: Option<KeyboardLayout>,
+    /// The desktop clipboard for CLIP; None where there's none to reach.
+    pub clipboard: Option<Clipboard>,
 }
 
 impl Server {
@@ -274,6 +302,7 @@ impl Server {
             hello_limit: RateLimiter::default(),
             theme: None,
             layout: None,
+            clipboard: None,
         }
     }
 
@@ -301,6 +330,7 @@ impl Server {
                 self.on_hello(&header, pkt, from, now)
             }
             T_INPUT => self.on_input(&header, pkt, from, now),
+            T_CLIP => self.on_clip(&header, pkt),
             T_BYE => {
                 self.on_bye(&header, pkt);
                 None
@@ -371,7 +401,7 @@ impl Server {
             server_random,
             session_id,
             name: self.host_name.clone(),
-            features: FEATURE_POINTER,
+            features: FEATURE_POINTER | if self.clipboard.is_some() { FEATURE_CLIPBOARD } else { 0 },
             bt_address: self.bt_address,
         }
         .encode();
@@ -397,6 +427,7 @@ impl Server {
                 packets: 0,
                 loss: LossMeter::default(),
                 theme_left: THEME_REPEATS,
+                clip: None,
             },
         );
         Some(reply)
@@ -532,6 +563,133 @@ impl Server {
         }
     }
 
+    /// A clipboard request. It doesn't count as hearing from the phone for
+    /// the stuck-key timeout: only INPUT says what's held.
+    fn on_clip(&mut self, header: &Header, pkt: &[u8]) -> Option<Vec<u8>> {
+        let (sid, plain) = self.authenticate(header, pkt)?;
+        let clip = Clip::decode(&plain, false)?;
+        if !self.sessions[&sid].established {
+            return None;
+        }
+        // Answer with the newest state.
+        self.drain_clipboard();
+        let mut reply = Clip { op: clip.op, clip_id: clip.clip_id, ..Default::default() };
+        match (&self.clipboard, clip.op) {
+            (None, CLIP_PUT | CLIP_GET) => reply.status = CLIP_FAILED,
+            (Some(cb), CLIP_PUT) => Self::clip_put(cb, sid, self.sessions.get_mut(&sid).unwrap(), &clip, &mut reply),
+            (Some(cb), CLIP_GET) => Self::clip_get(cb, sid, self.sessions.get_mut(&sid).unwrap(), &clip, &mut reply),
+            _ => return None,
+        }
+        let s = self.sessions.get_mut(&sid).unwrap();
+        s.server_counter += 1;
+        let h = Header { kind: T_CLIP_REPLY, device_id: s.device_id, nonce: session_nonce(sid, s.server_counter) };
+        Some(seal(&s.s2c, &h, &reply.encode(true)))
+    }
+
+    /// The phone's text, piece by piece; set (and pasted) once it's all in.
+    fn clip_put(cb: &Clipboard, sid: u32, s: &mut Session, clip: &Clip, reply: &mut Clip) {
+        reply.total = clip.total;
+        if s.clip.as_ref().is_none_or(|t| t.id != clip.clip_id || t.op != CLIP_PUT) {
+            // A new transfer starts at 0; anything else is from one we don't have.
+            if clip.offset != 0 {
+                reply.status = CLIP_UNKNOWN;
+                return;
+            }
+            let state = if clip.total == 0 || clip.total as usize > MAX_CLIP {
+                let status = if clip.total == 0 { CLIP_EMPTY } else { CLIP_TOO_LARGE };
+                ClipState::Done { status, total: 0, text: None }
+            } else {
+                ClipState::Receiving { buf: Vec::with_capacity(clip.total as usize), total: clip.total, flags: clip.flags }
+            };
+            s.clip = Some(Transfer { id: clip.clip_id, op: CLIP_PUT, state });
+        }
+        let t = s.clip.as_mut().unwrap();
+        if let ClipState::Receiving { buf, total, flags } = &mut t.state {
+            // Only the piece that carries on from what we have.
+            if clip.offset as usize == buf.len() {
+                let take = clip.data.len().min(*total as usize - buf.len());
+                buf.extend_from_slice(&clip.data[..take]);
+            }
+            if buf.len() == *total as usize {
+                let text = Text { bytes: std::mem::take(buf), sensitive: *flags & CLIP_SENSITIVE != 0 };
+                let paste = *flags & CLIP_PASTE != 0;
+                t.state = ClipState::Writing { total: *total, paste };
+                cb.submit(Job::Write { tag: (sid, t.id), text });
+            }
+        }
+        match &t.state {
+            ClipState::Receiving { buf, .. } => reply.offset = buf.len() as u32,
+            ClipState::Writing { total, .. } => {
+                reply.status = CLIP_WORKING;
+                reply.offset = *total;
+            }
+            ClipState::Done { status, .. } => {
+                reply.status = *status;
+                reply.offset = if *status == CLIP_OK { clip.total } else { 0 };
+            }
+            ClipState::Before | ClipState::Reading => unreachable!("a put never reads"),
+        }
+    }
+
+    /// The desktop's text, from the asked offset; read (after a copy) first.
+    fn clip_get(cb: &Clipboard, sid: u32, s: &mut Session, clip: &Clip, reply: &mut Clip) {
+        if s.clip.as_ref().is_none_or(|t| t.id != clip.clip_id || t.op != CLIP_GET) {
+            // With copy first, read what's there before pressing Ctrl+Insert,
+            // to see when the copy lands.
+            let copy = clip.flags & CLIP_COPY != 0;
+            cb.submit(Job::Read { tag: (sid, clip.clip_id), changed_from: None });
+            let state = if copy { ClipState::Before } else { ClipState::Reading };
+            s.clip = Some(Transfer { id: clip.clip_id, op: CLIP_GET, state });
+        }
+        reply.offset = clip.offset;
+        match &s.clip.as_ref().unwrap().state {
+            ClipState::Done { status, total, text } => {
+                reply.status = *status;
+                reply.total = *total;
+                if let Some(text) = text {
+                    let from = (clip.offset as usize).min(text.bytes.len());
+                    let to = (from + CLIP_CHUNK).min(text.bytes.len());
+                    reply.data = text.bytes[from..to].to_vec();
+                    reply.offset = from as u32;
+                    if text.sensitive {
+                        reply.flags |= CLIP_SENSITIVE;
+                    }
+                }
+            }
+            _ => reply.status = CLIP_WORKING,
+        }
+    }
+
+    /// Take the clipboard worker's results: press the keys a copy or paste
+    /// needs and move each transfer on.
+    fn drain_clipboard(&mut self) {
+        while let Some(done) = self.clipboard.as_ref().and_then(Clipboard::poll) {
+            let ((sid, id), result) = match done {
+                Done::Read { tag, contents } => (tag, Ok(contents)),
+                Done::Write { tag, ok } => (tag, Err(ok)),
+            };
+            let Some(s) = self.sessions.get_mut(&sid) else { continue };
+            let Some(t) = s.clip.as_mut().filter(|t| t.id == id) else { continue };
+            let kb = &mut self.kb;
+            t.state = match (std::mem::replace(&mut t.state, ClipState::Reading), result) {
+                (ClipState::Before, Ok(before)) => {
+                    tap(kb, KEY_LEFTCTRL, KEY_INSERT);
+                    self.clipboard.as_ref().unwrap().submit(Job::Read { tag: (sid, id), changed_from: Some(before) });
+                    ClipState::Reading
+                }
+                (ClipState::Reading, Ok(contents)) => read_done(contents),
+                (ClipState::Writing { total, paste }, Err(ok)) => {
+                    if ok && paste {
+                        tap(kb, KEY_LEFTSHIFT, KEY_INSERT);
+                    }
+                    ClipState::Done { status: if ok { CLIP_OK } else { CLIP_FAILED }, total, text: None }
+                }
+                // A result for a state that moved on: keep the state.
+                (state, _) => state,
+            };
+        }
+    }
+
     fn on_bye(&mut self, header: &Header, pkt: &[u8]) {
         if let Some((sid, _)) = self.authenticate(header, pkt) {
             self.drop_session(sid);
@@ -596,6 +754,7 @@ impl Server {
         }
         // The kernel keeps only a few events for us; read them before they wrap.
         self.kb.leds();
+        self.drain_clipboard();
     }
 
     pub fn session_infos(&self, now: Instant) -> Vec<SessionInfo> {
@@ -628,5 +787,27 @@ impl Server {
     #[cfg(test)]
     pub fn key_down(&self, code: u16) -> bool {
         self.kb.is_down(code)
+    }
+}
+
+/// A shortcut on the virtual keyboard: `modifier` + `key`, pressed and let go.
+fn tap(kb: &mut Keyboard, modifier: u16, key: u16) {
+    kb.press(modifier);
+    kb.press(key);
+    kb.release(key);
+    kb.release(modifier);
+}
+
+fn read_done(contents: Contents) -> ClipState {
+    match contents {
+        Ok(text) => ClipState::Done { status: CLIP_OK, total: text.bytes.len() as u32, text: Some(text) },
+        Err(e) => {
+            let status = match e {
+                ClipError::Empty => CLIP_EMPTY,
+                ClipError::TooLarge => CLIP_TOO_LARGE,
+                ClipError::Failed => CLIP_FAILED,
+            };
+            ClipState::Done { status, total: 0, text: None }
+        }
     }
 }

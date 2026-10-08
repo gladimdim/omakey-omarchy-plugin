@@ -56,6 +56,21 @@ pub fn generate() -> serde_json::Value {
     };
     let bye = client.bye().unwrap();
 
+    // The clipboard, in a session of its own with the same keys: a put of
+    // "Hi ✓" that pastes (client counter 1), and the reply that it's done
+    // (server counter 1).
+    let mut clip_client = Client::with_random(device_id, key, client_random);
+    assert!(clip_client.on_packet(&welcome).is_some());
+    let text = "Hi ✓".as_bytes();
+    let clip_put = Clip { op: CLIP_PUT, clip_id: 0x01020304, offset: 0, flags: CLIP_PASTE, total: text.len() as u32, data: text.to_vec(), ..Default::default() };
+    let clip_put_packet = clip_client.clip(&clip_put).unwrap();
+    let clip_reply = Clip { status: CLIP_OK, offset: text.len() as u32, flags: 0, data: vec![], ..clip_put.clone() };
+    let clip_reply_packet = seal(
+        &cipher(&keys.s2c),
+        &Header { kind: T_CLIP_REPLY, device_id, nonce: session_nonce(session_id, 1) },
+        &clip_reply.encode(true),
+    );
+
     json!({
         "description": "Protocol v1 vectors. Hex unless noted. All packets are full datagrams.",
         "device_id": hex(&device_id),
@@ -76,5 +91,10 @@ pub fn generate() -> serde_json::Value {
                     "pointer": { "dx": -12, "dy": 34, "wheel": 120, "hwheel": -60 }, "packet": hex(&input3),
                     "note": "counter 3 was the INPUT sent by the button press itself; this is the next one" },
         "bye": { "counter": 5, "packet": hex(&bye) },
+        "clip_put": { "counter": 1, "op": CLIP_PUT, "clip_id": 0x01020304u32, "offset": 0, "flags": CLIP_PASTE, "total": text.len(),
+                      "text": "Hi ✓", "body": hex(&clip_put.encode(false)), "packet": hex(&clip_put_packet),
+                      "note": "a session of its own, after the same WELCOME: counters start again" },
+        "clip_reply": { "counter": 1, "op": CLIP_PUT, "clip_id": 0x01020304u32, "status": CLIP_OK, "offset": text.len(), "flags": 0,
+                        "total": text.len(), "body": hex(&clip_reply.encode(true)), "packet": hex(&clip_reply_packet) },
     })
 }

@@ -1,5 +1,6 @@
 mod bluetooth;
 mod client;
+mod clipboard;
 mod daemon;
 mod hypr;
 mod keyboard;

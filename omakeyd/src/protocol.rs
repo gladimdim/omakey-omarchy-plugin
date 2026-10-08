@@ -19,11 +19,14 @@ pub const T_INPUT: u8 = 3;
 pub const T_ACK: u8 = 4;
 pub const T_BYE: u8 = 5;
 pub const T_REJECT: u8 = 6;
+pub const T_CLIP: u8 = 7;
+pub const T_CLIP_REPLY: u8 = 8;
 
 pub const REJECT_UNKNOWN_DEVICE: u8 = 1;
 
 /// WELCOME feature bits.
 pub const FEATURE_POINTER: u8 = 1;
+pub const FEATURE_CLIPBOARD: u8 = 2;
 
 pub type DeviceId = [u8; 8];
 pub type Key = [u8; 32];
@@ -374,6 +377,66 @@ impl Ack {
     }
 }
 
+/// CLIP `op`.
+pub const CLIP_PUT: u8 = 1;
+pub const CLIP_GET: u8 = 2;
+/// CLIP `flags`: put pastes once set, get copies first.
+pub const CLIP_PASTE: u8 = 1;
+pub const CLIP_COPY: u8 = 1;
+/// CLIP and CLIP_REPLY `flags`: the text is a password or the like.
+pub const CLIP_SENSITIVE: u8 = 2;
+/// CLIP_REPLY `status`.
+pub const CLIP_OK: u8 = 0;
+pub const CLIP_WORKING: u8 = 1;
+pub const CLIP_EMPTY: u8 = 2;
+pub const CLIP_TOO_LARGE: u8 = 3;
+pub const CLIP_FAILED: u8 = 4;
+pub const CLIP_UNKNOWN: u8 = 5;
+/// Longest clipboard text, in bytes.
+pub const MAX_CLIP: usize = 65536;
+/// Text bytes in one CLIP or CLIP_REPLY.
+pub const CLIP_CHUNK: usize = 1024;
+
+/// CLIP and CLIP_REPLY share a layout; a reply has `status` after `clip_id`.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Clip {
+    pub op: u8,
+    pub clip_id: u32,
+    /// CLIP_REPLY only.
+    pub status: u8,
+    pub offset: u32,
+    pub flags: u8,
+    pub total: u32,
+    pub data: Vec<u8>,
+}
+
+impl Clip {
+    pub fn encode(&self, reply: bool) -> Vec<u8> {
+        let mut out = Vec::with_capacity(15 + self.data.len());
+        out.push(self.op);
+        out.extend_from_slice(&self.clip_id.to_be_bytes());
+        if reply {
+            out.push(self.status);
+        }
+        out.extend_from_slice(&self.offset.to_be_bytes());
+        out.push(self.flags);
+        out.extend_from_slice(&self.total.to_be_bytes());
+        out.extend_from_slice(&self.data);
+        out
+    }
+    pub fn decode(buf: &[u8], reply: bool) -> Option<Clip> {
+        let mut r = Reader::new(buf);
+        let op = r.u8()?;
+        let clip_id = r.u32()?;
+        let status = if reply { r.u8()? } else { 0 };
+        let offset = r.u32()?;
+        let flags = r.u8()?;
+        let total = r.u32()?;
+        let data = r.take(r.remaining().min(CLIP_CHUNK))?.to_vec();
+        Some(Clip { op, clip_id, status, offset, flags, total, data })
+    }
+}
+
 /// The pairing fingerprint both screens show: the first 4 bytes of
 /// SHA-256(K) as "ABCD-1234".
 pub fn fingerprint(key: &Key) -> String {
@@ -489,6 +552,22 @@ mod tests {
         assert_eq!(Ack::decode(&enc).unwrap(), with);
         // Bytes after the known fields are ignored.
         assert_eq!(Ack::decode(&[enc.as_slice(), &[9, 9]].concat()).unwrap(), with);
+    }
+
+    #[test]
+    fn clip_round_trips_with_status_only_in_replies() {
+        let c = Clip { op: CLIP_PUT, clip_id: 0x01020304, status: 0, offset: 1024, flags: CLIP_PASTE, total: 1030, data: b"hello!".to_vec() };
+        let enc = c.encode(false);
+        assert_eq!(enc.len(), 14 + 6);
+        assert_eq!(Clip::decode(&enc, false).unwrap(), c);
+        let r = Clip { op: CLIP_GET, status: CLIP_WORKING, data: vec![], ..c.clone() };
+        let enc = r.encode(true);
+        assert_eq!(enc.len(), 15);
+        assert_eq!(Clip::decode(&enc, true).unwrap(), r);
+        assert!(Clip::decode(&enc[..14], true).is_none());
+        // Never more than a chunk of data.
+        let big = Clip { data: vec![7; CLIP_CHUNK + 10], ..c };
+        assert_eq!(Clip::decode(&big.encode(false), false).unwrap().data.len(), CLIP_CHUNK);
     }
 
     #[test]

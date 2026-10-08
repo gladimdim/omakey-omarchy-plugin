@@ -482,3 +482,170 @@ fn input_layout_round_trips_after_the_pointer() {
     assert_eq!(Input::decode(&bad).unwrap().layout, None);
 }
 
+
+// ---- clipboard (PROTOCOL.md, CLIP) ----
+
+const CTRL: u16 = 29;
+const SHIFT: u16 = 42;
+const INSERT: u16 = 110;
+
+impl Rig {
+    /// The rig with an in-memory clipboard, connected and past its first INPUT.
+    fn with_clipboard() -> (Rig, crate::clipboard::fake::Fake) {
+        let mut r = Rig::new();
+        let fake = crate::clipboard::fake::Fake::default();
+        r.server.clipboard = Some(crate::clipboard::Clipboard::start(Box::new(fake.clone())));
+        r.connect();
+        let input = r.client.input(5).unwrap();
+        r.send(input, 5);
+        (r, fake)
+    }
+
+    fn clip(&mut self, c: Clip) -> Option<Clip> {
+        let pkt = self.client.clip(&c).unwrap();
+        match self.send(pkt, 10) {
+            Some(Reply::Clip(reply)) => Some(reply),
+            _ => None,
+        }
+    }
+
+    /// Ask again while the server says it's working, as the phone does.
+    fn clip_until_done(&mut self, c: Clip) -> Clip {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let reply = self.clip(c.clone()).expect("a reply");
+            if reply.status != CLIP_WORKING || Instant::now() > deadline {
+                return reply;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+            self.server.tick(self.t0 + Duration::from_millis(10));
+        }
+    }
+
+    /// Put [text] the way the phone does: in order, a chunk at a time.
+    fn put(&mut self, id: u32, text: &[u8], flags: u8) -> Clip {
+        let mut offset = 0usize;
+        loop {
+            let end = (offset + CLIP_CHUNK).min(text.len());
+            let c = Clip { op: CLIP_PUT, clip_id: id, offset: offset as u32, flags, total: text.len() as u32, data: text[offset..end].to_vec(), ..Default::default() };
+            let reply = self.clip_until_done(c);
+            if reply.status != CLIP_OK || reply.offset as usize == text.len() {
+                return reply;
+            }
+            offset = reply.offset as usize;
+        }
+    }
+
+    /// Get the desktop's text the way the phone does.
+    fn get(&mut self, id: u32, flags: u8) -> Result<(Vec<u8>, u8), u8> {
+        let mut text = Vec::new();
+        loop {
+            let c = Clip { op: CLIP_GET, clip_id: id, offset: text.len() as u32, flags, ..Default::default() };
+            let reply = self.clip_until_done(c);
+            if reply.status != CLIP_OK {
+                return Err(reply.status);
+            }
+            assert_eq!(reply.offset as usize, text.len());
+            text.extend_from_slice(&reply.data);
+            if text.len() >= reply.total as usize {
+                return Ok((text, reply.flags));
+            }
+        }
+    }
+}
+
+#[test]
+fn welcome_advertises_the_clipboard_only_when_there_is_one() {
+    let mut r = Rig::new();
+    let hello = r.client.hello("Pixel");
+    let reply = r.server.handle(&hello, r.addr, r.t0).unwrap();
+    let w = Welcome::decode(&open(&cipher(&r.key), &reply).unwrap()).unwrap();
+    assert_eq!(w.features & FEATURE_CLIPBOARD, 0);
+
+    let mut r = Rig::new();
+    r.server.clipboard = Some(crate::clipboard::Clipboard::start(Box::new(crate::clipboard::fake::Fake::default())));
+    let hello = r.client.hello("Pixel");
+    let reply = r.server.handle(&hello, r.addr, r.t0).unwrap();
+    let w = Welcome::decode(&open(&cipher(&r.key), &reply).unwrap()).unwrap();
+    assert_eq!(w.features, FEATURE_POINTER | FEATURE_CLIPBOARD);
+}
+
+#[test]
+fn put_sets_the_clipboard_then_pastes() {
+    let (mut r, fake) = Rig::with_clipboard();
+    let text = "Привіт, desktop! ".repeat(150).into_bytes(); // several chunks
+    assert!(text.len() > 2 * CLIP_CHUNK);
+    let reply = r.put(7, &text, CLIP_PASTE);
+    assert_eq!((reply.status, reply.offset as usize), (CLIP_OK, text.len()));
+    let set = fake.contents.lock().unwrap().clone().unwrap();
+    assert_eq!(set.bytes, text);
+    assert!(!set.sensitive);
+    assert_eq!(r.rec.take(), vec![(SHIFT, true), (INSERT, true), (INSERT, false), (SHIFT, false)]);
+    // Asking again doesn't paste again.
+    let again = r.clip(Clip { op: CLIP_PUT, clip_id: 7, offset: text.len() as u32, total: text.len() as u32, ..Default::default() }).unwrap();
+    assert_eq!(again.status, CLIP_OK);
+    assert!(r.rec.take().is_empty());
+}
+
+#[test]
+fn put_keeps_only_the_piece_that_carries_on() {
+    let (mut r, fake) = Rig::with_clipboard();
+    let text = vec![b'x'; CLIP_CHUNK + 10];
+    let first = Clip { op: CLIP_PUT, clip_id: 1, total: text.len() as u32, flags: CLIP_SENSITIVE, data: text[..CLIP_CHUNK].to_vec(), ..Default::default() };
+    assert_eq!(r.clip(first.clone()).unwrap().offset as usize, CLIP_CHUNK);
+    // A resent first piece changes nothing.
+    assert_eq!(r.clip(first).unwrap().offset as usize, CLIP_CHUNK);
+    // A piece past the end of what the server has is ignored.
+    let gap = Clip { op: CLIP_PUT, clip_id: 1, offset: CLIP_CHUNK as u32 + 5, total: text.len() as u32, data: vec![b'x'; 5], ..Default::default() };
+    assert_eq!(r.clip(gap).unwrap().offset as usize, CLIP_CHUNK);
+    let last = Clip { op: CLIP_PUT, clip_id: 1, offset: CLIP_CHUNK as u32, total: text.len() as u32, flags: CLIP_SENSITIVE, data: text[CLIP_CHUNK..].to_vec(), ..Default::default() };
+    assert_eq!(r.clip_until_done(last).status, CLIP_OK);
+    let set = fake.contents.lock().unwrap().clone().unwrap();
+    assert_eq!(set.bytes, text);
+    assert!(set.sensitive);
+    // Without the paste flag nothing is pressed.
+    assert!(r.rec.take().is_empty());
+}
+
+#[test]
+fn put_refuses_unknown_transfers_and_oversized_text() {
+    let (mut r, _) = Rig::with_clipboard();
+    let mid = Clip { op: CLIP_PUT, clip_id: 9, offset: 1024, total: 2000, data: vec![1; 10], ..Default::default() };
+    assert_eq!(r.clip(mid).unwrap().status, CLIP_UNKNOWN);
+    let huge = Clip { op: CLIP_PUT, clip_id: 10, total: MAX_CLIP as u32 + 1, data: vec![1; 10], ..Default::default() };
+    assert_eq!(r.clip(huge).unwrap().status, CLIP_TOO_LARGE);
+}
+
+#[test]
+fn get_with_copy_presses_ctrl_insert_and_waits_for_the_new_text() {
+    let (mut r, fake) = Rig::with_clipboard();
+    let old = crate::clipboard::Text { bytes: b"old".to_vec(), sensitive: false };
+    let new = crate::clipboard::Text { bytes: "selected ✓".repeat(200).into_bytes(), sensitive: true };
+    // Before the copy, then once unchanged, then the app has copied.
+    fake.reads.lock().unwrap().extend([Ok(old.clone()), Ok(old), Ok(new.clone())]);
+    let (text, flags) = r.get(3, CLIP_COPY).unwrap();
+    assert_eq!(text, new.bytes);
+    assert_eq!(flags & CLIP_SENSITIVE, CLIP_SENSITIVE);
+    assert_eq!(r.rec.take(), vec![(CTRL, true), (INSERT, true), (INSERT, false), (CTRL, false)]);
+}
+
+#[test]
+fn get_reads_without_pressing_anything_and_reports_empty() {
+    let (mut r, fake) = Rig::with_clipboard();
+    assert_eq!(r.get(1, 0), Err(CLIP_EMPTY));
+    *fake.contents.lock().unwrap() = Some(crate::clipboard::Text { bytes: b"hi".to_vec(), sensitive: false });
+    assert_eq!(r.get(2, 0), Ok((b"hi".to_vec(), 0)));
+    assert!(r.rec.take().is_empty());
+}
+
+#[test]
+fn clip_needs_a_session_in_use_and_a_clipboard() {
+    let mut r = Rig::new();
+    r.connect();
+    // Before the first INPUT: ignored.
+    assert!(r.clip(Clip { op: CLIP_GET, clip_id: 1, ..Default::default() }).is_none());
+    let input = r.client.input(5).unwrap();
+    r.send(input, 5);
+    // No clipboard on this server: failed, not silence.
+    assert_eq!(r.clip(Clip { op: CLIP_GET, clip_id: 1, ..Default::default() }).unwrap().status, CLIP_FAILED);
+}

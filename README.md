@@ -33,6 +33,10 @@ as you like, just as on a Bluetooth keyboard, but over Wi-Fi.
   switch between Wi-Fi and Bluetooth.
 - **Lock lights.** Caps Lock, Num Lock and Scroll Lock state goes back to
   the phone, so the app can show it.
+- **Shared clipboard.** Copy on the phone copies what's selected on the
+  desktop and puts it on the phone's clipboard too; Paste pastes on the
+  desktop, bringing the phone's clipboard along when it has something newer.
+  Needs `wl-copy` and `wl-paste` (Omarchy has them).
 
 The app can also be a plain Bluetooth keyboard for computers without
 `omakeyd`: pair the phone in that computer's Bluetooth settings.
