@@ -83,7 +83,14 @@ if [[ ${1:-} == --uninstall ]]; then
   exit 0
 fi
 
-command -v cargo >/dev/null || { echo "cargo is required: sudo pacman -S rust" >&2; exit 1; }
+# The build needs Rust. On Omarchy (Arch) install it, pacman asks first.
+if ! command -v cargo >/dev/null; then
+  if command -v pacman >/dev/null; then
+    echo "Installing Rust to build omakeyd..."
+    sudo pacman -S --needed rust
+  fi
+  command -v cargo >/dev/null || { echo "cargo is required: sudo pacman -S rust" >&2; exit 1; }
+fi
 
 echo "Building omakeyd..."
 cargo build --release --locked --manifest-path "$ROOT/omakeyd/Cargo.toml"

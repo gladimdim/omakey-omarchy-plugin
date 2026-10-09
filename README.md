@@ -2,8 +2,17 @@
 
 **Your phone becomes a real keyboard for your Omarchy desktop.**
 
-**Website and live demo: <https://gladimdim.github.io/omakey-omarchy-plugin/>** ·
-Android app: [download the APK](https://github.com/gladimdim/omakey-mobile/releases/latest)
+<p align="center">
+  <a href="https://gladimdim.github.io/omakey-omarchy-plugin/"><img src="preview.png" alt="Omakey: your phone is the keyboard" width="720"></a>
+</p>
+
+- **Website and live demo:** <https://gladimdim.github.io/omakey-omarchy-plugin/>
+- **Android app:** [download the latest APK](https://github.com/gladimdim/omakey-mobile/releases/latest)
+  ([source](https://github.com/gladimdim/omakey-mobile)), or scan this with your phone:
+
+<p>
+  <a href="https://github.com/gladimdim/omakey-mobile/releases/latest"><img src="docs/media/apk-qr.svg" alt="QR code: latest Omakey APK" width="180"></a>
+</p>
 
 Pair the Omakey phone app with a QR code and the desktop gets a new
 keyboard: Esc, F1–F12, Super, Ctrl, Alt, arrows, media keys, all of it.
@@ -43,15 +52,31 @@ The app can also be a plain Bluetooth keyboard for computers without
 
 ## Install
 
-Needs Omarchy with the Omarchy shell (`omarchy plugin` available) and Rust
-(`sudo pacman -S rust`).
+Needs Omarchy 4 with the Omarchy shell (`omarchy plugin` available) and an
+Android phone on the same Wi-Fi (or Bluetooth).
+
+**1. On the desktop**, one command:
 
 ```bash
-omarchy plugin add https://github.com/gladimdim/omakey-omarchy-plugin --enable
-~/.config/omarchy/plugins/gladimdim.omakey/install.sh
+omarchy plugin add https://github.com/gladimdim/omakey-omarchy-plugin --enable && ~/.config/omarchy/plugins/gladimdim.omakey/install.sh
 ```
 
-`install.sh` builds `omakeyd` and asks for sudo once to install:
+It adds the bar widget, then builds and starts `omakeyd`. It asks for your
+password once, and installs Rust first if it's missing.
+
+Added the plugin some other way, such as from the
+[Omarchy plugin marketplace](https://omarchyplugins.com/)? Click the ⌨ icon
+in the bar and choose *Set up Omakey*. It runs the same `install.sh`.
+
+**2. On the phone**, install the
+[latest Omakey APK](https://github.com/gladimdim/omakey-mobile/releases/latest)
+(scan the QR code above). Allow *Install unknown apps* for your browser
+when Android asks.
+
+**3. Pair:** click the ⌨ icon in the bar, *Pair a phone*, and scan the code
+with the Omakey app.
+
+### What `install.sh` installs
 
 | What | Why |
 |------|-----|
@@ -196,9 +221,11 @@ acts as a phone: it pairs, types the text, and prints the ping.
 ## Uninstall
 
 ```bash
-~/.config/omarchy/plugins/gladimdim.omakey/install.sh --uninstall
-omarchy plugin remove gladimdim.omakey
+~/.config/omarchy/plugins/gladimdim.omakey/install.sh --uninstall && omarchy plugin remove gladimdim.omakey
 ```
+
+Paired phones stay in `~/.config/omakey`; delete that folder to forget them.
+Uninstall the Android app as usual.
 
 ## License
 
