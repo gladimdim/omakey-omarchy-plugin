@@ -226,7 +226,7 @@
     }));
     let shift = false, caps = false;
     const phone = new OMK.Phone($(".phone-host", root), {
-      layout: OMK.layout("classic-qwerty"), touchpad: false, compact: true, host: "Bluetooth keyboard",
+      layout: OMK.layout("classic-qwerty"), touchpad: false, compact: true, host: "Bluetooth keyboard", bluetooth: true,
       onKey: (code, down) => {
         if (code.endsWith("SHIFT")) { shift = down; return; }
         if (!down) return;
@@ -238,8 +238,8 @@
         paint();
       },
     });
-    phone.setStatus("ok", "Bluetooth keyboard · " + target);
-    $$(".devices button", root).forEach((b) => b.addEventListener("click", () => phone.setStatus("ok", "Bluetooth keyboard · " + b.dataset.dev)));
+    phone.setStatus("ok", target + " · Bluetooth keyboard");
+    $$(".devices button", root).forEach((b) => b.addEventListener("click", () => phone.setStatus("ok", b.dataset.dev + " · Bluetooth keyboard")));
     paint();
   };
 

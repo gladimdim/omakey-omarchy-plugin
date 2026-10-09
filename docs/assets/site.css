@@ -248,6 +248,7 @@ footer a { color: var(--muted); }
 .kb-pill i { font-style: normal; color: var(--p-ok); margin-right: .4em; }
 .kb-pill.warn i { color: var(--p-warn); }
 .kb-pill.err i { color: var(--p-err); }
+.kb-pill .bt-sign { display: inline-block; width: 1.15em; height: 1.15em; vertical-align: -.25em; margin-right: .3em; }
 .kb-handle {
   position: absolute; left: 50%; top: 52%; transform: translate(-50%, -50%); font: 700 clamp(8px, 1.1vw, 12px)/1 var(--sans); color: var(--p-accent);
   background: var(--p-surface); border: 1px solid var(--p-accent); border-radius: 999px; padding: .45em 1.3em; cursor: pointer; white-space: nowrap;
