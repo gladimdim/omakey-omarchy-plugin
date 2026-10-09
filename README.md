@@ -133,6 +133,9 @@ Click the ⌨ icon in the bar. The panel does everything:
 - **Service** — start it, stop it, restart it, or open its logs. The footer
   says whether Bluetooth is on, and why not when it's off.
 - **Settings** — the name your phone shows and the UDP port.
+- **Android app** — *Get the Android app* shows a QR code for the latest
+  Omakey APK, with *Open in browser* and *Copy link*. During pairing it
+  takes the pairing code's place until you go *Back to pairing*.
 
 The QR code is good for one phone and 5 minutes. After pairing, the phone
 finds the desktop by itself (mDNS), even when its IP address changes.

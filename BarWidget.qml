@@ -55,6 +55,78 @@ Panel {
   property string confirmForgetId: ""
   property bool settingsOpen: false
   property bool copied: false
+  property bool appOpen: false
+  property bool appCopied: false
+
+  // The Android app: its latest release, and that link as a QR code (made
+  // with qrencode, one string of 0/1 per row). Built in, so it shows even
+  // before the service is set up, when the phone needs it most.
+  readonly property string appUrl: "https://github.com/gladimdim/omakey-mobile/releases/latest"
+  readonly property var appQr: [
+      "111111100100000110011001001111111",
+      "100000101101100001101110001000001",
+      "101110100111001010111110101011101",
+      "101110101101000001010001101011101",
+      "101110100010111100110001001011101",
+      "100000101010011100001010101000001",
+      "111111101010101010101010101111111",
+      "000000000000110110001110000000000",
+      "111110111110101111000010110101010",
+      "000100000100000011111001001000111",
+      "010010110101100110000010000111010",
+      "000110000111001000101110011010100",
+      "011000111101000111010011110111000",
+      "010100001110111010111001001100011",
+      "100001110010011110001110011110010",
+      "011100010010110110000110111100100",
+      "010001111110101101010011110110010",
+      "011111001100000010111101001001011",
+      "101001110111100100100100111001010",
+      "010110000011001110010110010000100",
+      "111111110111000111000010100010010",
+      "101111011000111010011001001001011",
+      "100010110110011111101000011101010",
+      "100001001010110100011110111111100",
+      "100000100000101101010010111110001",
+      "000000001110000010111100100011101",
+      "111111101001100100001111101011010",
+      "100000100001001110001111100011101",
+      "101110101101000001010010111110001",
+      "101110101010111010011010110110011",
+      "101110101110011111101101001001100",
+      "100000101110110010001110010101100",
+      "111111101110101001110001111001010"
+  ]
+
+  // A QR code: dark on light, which phones scan reliably whatever the theme.
+  component QrCode: Rectangle {
+    property var rows: []
+    color: "#ffffff"
+    radius: Style.space(6)
+
+    Canvas {
+      anchors.fill: parent
+      property var rows: parent.rows
+      onRowsChanged: requestPaint()
+      onWidthChanged: requestPaint()
+      onPaint: {
+        var ctx = getContext("2d")
+        ctx.reset()
+        var n = rows.length
+        if (!n) return
+        // Whole-pixel modules keep the edges crisp; 3 modules of margin.
+        var cell = Math.floor(width / (n + 6))
+        var off = Math.floor((width - cell * n) / 2)
+        ctx.fillStyle = "#000000"
+        for (var y = 0; y < n; y++) {
+          var row = rows[y]
+          for (var x = 0; x < n; x++) {
+            if (row.charAt(x) === "1") ctx.fillRect(off + x * cell, off + y * cell, cell, cell)
+          }
+        }
+      }
+    }
+  }
 
   readonly property string phase: {
     if (!probed) return "probing"
@@ -194,6 +266,12 @@ Panel {
     onTriggered: root.copied = false
   }
 
+  Timer {
+    id: appCopiedTimer
+    interval: 1500
+    onTriggered: root.appCopied = false
+  }
+
   // ---- actions ----
   function run(args) { Quickshell.execDetached([root.bin].concat(args)) }
   function systemctl(verb) {
@@ -231,6 +309,15 @@ Panel {
     root.copied = true
     copiedTimer.restart()
   }
+  function openAppPage() {
+    Quickshell.execDetached(["xdg-open", root.appUrl])
+    root.close()
+  }
+  function copyAppLink() {
+    Quickshell.execDetached(["wl-copy", root.appUrl])
+    root.appCopied = true
+    appCopiedTimer.restart()
+  }
   function forget(id) {
     root.confirmForgetId = ""
     run(["forget", id])
@@ -267,6 +354,7 @@ Panel {
       root.renamingId = ""
       root.confirmForgetId = ""
       root.settingsOpen = false
+      root.appOpen = false
     }
   }
 
@@ -457,42 +545,18 @@ Panel {
         }
 
         // ---- pairing ----
+        // The app's QR code takes this one's place while it's open: get the
+        // app first, then pair.
         Column {
-          visible: root.pairing !== null
+          visible: root.pairing !== null && !root.appOpen
           width: parent.width
           spacing: Style.space(10)
 
-          Rectangle {
-            // QR codes need dark-on-light to scan reliably, whatever the theme.
-            color: "#ffffff"
-            radius: Style.space(6)
+          QrCode {
+            rows: root.pairing ? root.pairing.qr : []
             width: Math.min(parent.width, Style.space(250))
             height: width
             anchors.horizontalCenter: parent.horizontalCenter
-
-            Canvas {
-              id: qr
-              anchors.fill: parent
-              property var rows: root.pairing ? root.pairing.qr : []
-              onRowsChanged: requestPaint()
-              onWidthChanged: requestPaint()
-              onPaint: {
-                var ctx = getContext("2d")
-                ctx.reset()
-                var n = rows.length
-                if (!n) return
-                // Whole-pixel modules keep the edges crisp; 3 modules of margin.
-                var cell = Math.floor(width / (n + 6))
-                var off = Math.floor((width - cell * n) / 2)
-                ctx.fillStyle = "#000000"
-                for (var y = 0; y < n; y++) {
-                  var row = rows[y]
-                  for (var x = 0; x < n; x++) {
-                    if (row.charAt(x) === "1") ctx.fillRect(off + x * cell, off + y * cell, cell, cell)
-                  }
-                }
-              }
-            }
           }
 
           Text {
@@ -555,6 +619,71 @@ Panel {
           fontFamily: root.bar.fontFamily
           bordered: true
           onClicked: root.startPairing()
+        }
+
+        // ---- the Android app ----
+        Button {
+          width: parent.width
+          text: root.appOpen ? (root.pairing ? "Back to pairing" : "Hide the Android app link") : "Get the Android app"
+          // nf-md-android
+          iconText: "󰀲"
+          tooltipText: "A QR code and link to the latest Omakey APK"
+          foreground: root.bar.foreground
+          fontFamily: root.bar.fontFamily
+          bordered: true
+          onClicked: root.appOpen = !root.appOpen
+        }
+
+        Column {
+          visible: root.appOpen
+          width: parent.width
+          spacing: Style.space(10)
+
+          QrCode {
+            rows: root.appQr
+            width: Math.min(parent.width, Style.space(220))
+            height: width
+            anchors.horizontalCenter: parent.horizontalCenter
+          }
+
+          Text {
+            width: parent.width
+            horizontalAlignment: Text.AlignHCenter
+            text: "Scan with your phone's camera to download the latest Omakey APK, then open it to install."
+            textFormat: Text.PlainText
+            wrapMode: Text.WordWrap
+            color: Util.alpha(root.bar.foreground, 0.6)
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+
+          Row {
+            id: appActions
+            width: parent.width
+            spacing: Style.space(6)
+            readonly property real cellWidth: (width - spacing) / 2
+
+            Button {
+              width: appActions.cellWidth
+              text: "Open in browser"
+              // nf-md-open_in_new
+              iconText: "󰏌"
+              foreground: root.bar.foreground
+              fontFamily: root.bar.fontFamily
+              bordered: true
+              onClicked: root.openAppPage()
+            }
+
+            Button {
+              width: appActions.cellWidth
+              text: root.appCopied ? "Copied" : "Copy link"
+              iconText: "󰆏"
+              foreground: root.bar.foreground
+              fontFamily: root.bar.fontFamily
+              bordered: true
+              onClicked: root.copyAppLink()
+            }
+          }
         }
 
         // ---- phones ----
