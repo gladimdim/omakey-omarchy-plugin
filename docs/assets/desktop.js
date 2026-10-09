@@ -146,7 +146,6 @@
       { id: "pixel", name: "Pixel 9 Pro", online: true, transport: "wifi", addr: "192.168.1.42", loss: 0, held: 0, ping: 3, lastSeen: 0 },
       { id: "tab", name: "Galaxy Tab S9", online: false, transport: "wifi", addr: "", loss: 0, held: 0, ping: 0, lastSeen: Date.now() / 1000 - 3 * 3600 },
     ],
-    bluetooth: "on",
   };
   OMK.on = (fn) => listeners.add(fn);
   OMK.emit = (ev) => listeners.forEach((fn) => fn(ev || {}));
@@ -323,8 +322,8 @@
       if (c === "uname") { out("Linux desk 6.17.2-arch1-1 x86_64 GNU/Linux"); return; }
       if (c === "omakeyd" && args[0] === "status") {
         const d = OMK.state.devices.filter((x) => x.online);
-        out("omakeyd 1.3.0 · running · UDP " + OMK.state.port + " · Bluetooth " + OMK.state.bluetooth, "k");
-        d.forEach((x) => out("  ● " + x.name + "  " + (x.transport === "bluetooth" ? "Bluetooth" : "Wi-Fi " + x.addr) + " · ping " + x.ping + " ms · " + this.held.size + " held"));
+        out("omakeyd 1.3.0 · running · UDP " + OMK.state.port, "k");
+        d.forEach((x) => out("  ● " + x.name + "  " + "Wi-Fi " + x.addr + " · ping " + x.ping + " ms · " + this.held.size + " held"));
         if (!d.length) out("  no phones connected", "m");
         return;
       }
@@ -381,7 +380,6 @@
         '<span class="m">$ journalctl --user -u omakeyd -f</span>',
         '<span class="m">omakeyd[812]:</span> omakeyd 1.3.0 listening on UDP 47800, mDNS _omakey._udp',
         '<span class="m">omakeyd[812]:</span> virtual devices: "Omakey Keyboard", "Omakey Mouse"',
-        '<span class="m">omakeyd[812]:</span> Bluetooth RFCOMM ready',
         '<span class="m">omakeyd[812]:</span> <span class="p">Pixel 9 Pro connected</span> over Wi-Fi 192.168.1.42 (session 7f3a)',
       ];
       w.log = (s) => { w.lines.push('<span class="m">omakeyd[812]:</span> ' + s); if (w.lines.length > 80) w.lines.splice(1, 20); w.out.innerHTML = w.lines.join("\n"); };

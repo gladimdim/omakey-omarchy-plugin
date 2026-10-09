@@ -17,7 +17,7 @@
 Pair the Omakey phone app with a QR code and the desktop gets a new
 keyboard: Esc, F1–F12, Super, Ctrl, Alt, arrows, media keys, all of it.
 Hold `SUPER + SPACE`, `CTRL + SHIFT + T` or any chord with as many fingers
-as you like, just as on a Bluetooth keyboard, but over Wi-Fi.
+as you like, just as on a USB keyboard, but over Wi-Fi.
 
 - **A real keyboard, not a text box.** `omakeyd` creates a kernel virtual
   keyboard (`uinput`). Hyprland binds, games, terminals and the lock screen
@@ -35,11 +35,6 @@ as you like, just as on a Bluetooth keyboard, but over Wi-Fi.
   Mouse", next to "Omakey Keyboard".
 - **Bar widget.** See which phones are connected, pair new ones, and forget
   old ones.
-- **Bluetooth fallback.** Off Wi-Fi, the phone reaches `omakeyd` over
-  Bluetooth instead, with the same encrypted packets. It needs `bluetoothd`
-  running; nothing extra to pair. `omakeyd` picks it up when Bluetooth is
-  turned on or `bluetoothd` restarts, and a held key or drag survives the
-  switch between Wi-Fi and Bluetooth.
 - **Lock lights.** Caps Lock, Num Lock and Scroll Lock state goes back to
   the phone, so the app can show it.
 - **Shared clipboard.** Copy on the phone copies what's selected on the
@@ -47,13 +42,10 @@ as you like, just as on a Bluetooth keyboard, but over Wi-Fi.
   desktop, bringing the phone's clipboard along when it has something newer.
   Needs `wl-copy` and `wl-paste` (Omarchy has them), or KDE's clipboard.
 
-The app can also be a plain Bluetooth keyboard for computers without
-`omakeyd`: pair the phone in that computer's Bluetooth settings.
-
 ## Install
 
 Needs Omarchy 4 with the Omarchy shell (`omarchy plugin` available) and an
-Android phone on the same Wi-Fi (or Bluetooth).
+Android phone on the same Wi-Fi.
 
 **1. On the desktop**, one command:
 
@@ -127,11 +119,10 @@ Click the ⌨ icon in the bar. The panel does everything:
   straight away; opening it again shows the same code while it has more than
   a minute left. The copied link is marked sensitive, so clipboard managers
   skip it, and cleared after a minute.
-- **Phones** — who is connected, over Wi-Fi (with the address) or
-  Bluetooth, how many packets are being lost, how many keys they hold, and
-  when the others were last seen. Rename (✎) or forget (⛓) each one.
-- **Service** — start it, stop it, restart it, or open its logs. The footer
-  says whether Bluetooth is on, and why not when it's off.
+- **Phones** — who is connected and over which address, how many packets
+  are being lost, how many keys they hold, and when the others were last
+  seen. Rename (✎) or forget (⛓) each one.
+- **Service** — start it, stop it, restart it, or open its logs.
 - **Settings** — the name your phone shows and the UDP port.
 - **Android app** — *Get the Android app* shows a QR code for the latest
   Omakey APK, with *Open in browser* and *Copy link*. During pairing it

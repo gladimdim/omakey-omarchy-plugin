@@ -1,5 +1,5 @@
 /* Smaller demos: touch-down timeline, the wire (lost packets, stuck keys),
-   Bluetooth fallback, Bluetooth keyboard mode, layout gallery, CLI. */
+   layout gallery, CLI. */
 (function () {
   "use strict";
   const OMK = window.OMK;
@@ -162,87 +162,6 @@
     render();
   };
 
-  /* ═══ Bluetooth fallback ═════════════════════════════════ */
-  OMK.initFallback = (root) => {
-    const wifi = $(".path.wifi", root), bt = $(".path.bt", root), state = $(".bt-state", root), sim = $(".bt-sim", root);
-    let wifiOn = true, using = "wifi", holding = false, t = 0;
-    const paint = () => {
-      wifi.className = "path wifi " + (!wifiOn ? "down" : using === "wifi" ? "active" : "idle");
-      bt.className = "path bt " + (using === "bt" ? "active" : "idle");
-      wifi.querySelector("span").textContent = wifiOn ? "Wi-Fi · UDP 47800" : "Wi-Fi · no answer";
-    };
-    const hist = [];
-    const say = (html) => {
-      hist.push(html);
-      if (hist.length > 5) hist.shift();
-      state.innerHTML = hist.map((h, i) => '<div style="opacity:' + (i === hist.length - 1 ? 1 : 0.45 + i * 0.1) + '">' + (i === hist.length - 1 ? "› " : "  ") + h + "</div>").join("");
-    };
-    const heldTxt = () => (holding ? " · <b>SHIFT still held</b>" : "");
-    const flow = () => {
-      if (!sim.isConnected) return;
-      const path = using === "wifi" ? wifi : bt;
-      if ((using === "wifi" && !wifiOn) || reduced()) return;
-      const d = el("div", "flow");
-      sim.appendChild(d);
-      const r = path.getBoundingClientRect(), s = sim.getBoundingClientRect();
-      const y = r.top - s.top + r.height / 2 - 4;
-      d.animate([{ transform: "translate(" + (r.left - s.left) + "px," + y + "px)" }, { transform: "translate(" + (r.right - s.left - 8) + "px," + y + "px)" }], { duration: 900, easing: "ease-in-out" }).onfinish = () => d.remove();
-    };
-    setInterval(flow, 450);
-    $$("[data-b]", root).forEach((b) => b.addEventListener("click", () => {
-      const a = b.dataset.b;
-      if (a === "wifi") {
-        wifiOn = !wifiOn;
-        b.textContent = wifiOn ? "Turn Wi-Fi off" : "Turn Wi-Fi on";
-        clearTimeout(t);
-        if (!wifiOn) {
-          say("Wi-Fi went quiet. Waiting for a WELCOME over UDP…" + heldTxt());
-          paint();
-          t = setTimeout(() => { using = "bt"; paint(); say("No WELCOME after 1.2 s: <b>Bluetooth RFCOMM</b> joins with the same encrypted packets." + heldTxt()); }, 1200);
-        } else {
-          say("Wi-Fi is back. UDP never stopped trying…" + heldTxt());
-          paint();
-          t = setTimeout(() => { using = "wifi"; paint(); say("WELCOME over UDP: <b>back on Wi-Fi</b>, Bluetooth stops. The new session takes over the held keys." + heldTxt()); }, 700);
-        }
-      } else if (a === "hold") {
-        holding = !holding;
-        b.classList.toggle("on", holding);
-        b.textContent = holding ? "Release Shift" : "Hold Shift";
-        say((holding ? "Holding SHIFT over " : "Released SHIFT over ") + (using === "wifi" ? "Wi-Fi." : "Bluetooth.") + (holding ? " Now switch the network." : ""));
-      }
-    }));
-    paint();
-    say("Connected over <b>Wi-Fi</b> · 3 ms. Hold Shift, then turn Wi-Fi off.");
-  };
-
-  /* ═══ Bluetooth keyboard mode (any computer) ═════════════ */
-  OMK.initHid = (root) => {
-    const screen = $(".bt-screen", root);
-    let target = "Mac", text = "";
-    const paint = () => { screen.innerHTML = '<span class="m">' + target + " · paired as a Bluetooth keyboard and mouse</span>\n" + text.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]) + "▌"; };
-    $$(".devices button", root).forEach((b) => b.addEventListener("click", () => {
-      $$(".devices button", root).forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
-      target = b.dataset.dev; text = ""; paint();
-    }));
-    let shift = false, caps = false;
-    const phone = new OMK.Phone($(".phone-host", root), {
-      layout: OMK.layout("classic-qwerty"), touchpad: false, compact: true, host: "Bluetooth keyboard", bluetooth: true,
-      onKey: (code, down) => {
-        if (code.endsWith("SHIFT")) { shift = down; return; }
-        if (!down) return;
-        if (code === "KEY_CAPSLOCK") { caps = !caps; phone.kb.setCaps(caps); return; }
-        if (code === "KEY_BACKSPACE") text = text.slice(0, -1);
-        else if (code === "KEY_ENTER") text += "\n";
-        else { const c = OMK.charFor(code, shift, caps, "us"); if (c) text += c; }
-        text = text.slice(-120);
-        paint();
-      },
-    });
-    phone.setStatus("ok", target + " · Bluetooth keyboard");
-    $$(".devices button", root).forEach((b) => b.addEventListener("click", () => phone.setStatus("ok", b.dataset.dev + " · Bluetooth keyboard")));
-    paint();
-  };
-
   /* ═══ Layout gallery ═════════════════════════════════════ */
   OMK.initGallery = (root) => {
     const tabs = $(".gal-tabs", root), desc = $(".gal-meta p", root), layersBox = $(".gal-meta .layers", root), sent = $(".gal-sent", root);
@@ -295,8 +214,8 @@
     const cmds = {
       pair: ["omakeyd pair", () => [["Scan this with the Omakey app (one phone, 5 minutes):", "a"]].concat(qrText().map((l) => [l, "q"]))
         .concat([["  Fingerprint K7QD-4M2X · the phone shows the same code", "y"], ["  Waiting for the phone… (Ctrl+C to cancel)", "m"]])],
-      status: ["omakeyd status", () => [["omakeyd 1.3.0 · running · UDP " + S.port + " · Bluetooth " + S.bluetooth, "a"]]
-        .concat(S.devices.map((d) => ["  " + (d.online ? "● " : "○ ") + d.name.padEnd(16) + (d.online ? (d.transport === "bluetooth" ? "Bluetooth" : "Wi-Fi " + d.addr) + " · ping " + d.ping + " ms" : "last seen " + OMK.ago(d.lastSeen || 0)), d.online ? "" : "m"]))],
+      status: ["omakeyd status", () => [["omakeyd 1.3.0 · running · UDP " + S.port, "a"]]
+        .concat(S.devices.map((d) => ["  " + (d.online ? "● " : "○ ") + d.name.padEnd(16) + (d.online ? "Wi-Fi " + d.addr + " · ping " + d.ping + " ms" : "last seen " + OMK.ago(d.lastSeen || 0)), d.online ? "" : "m"]))],
       devices: ["omakeyd devices", () => [["ID          NAME             LAST SEEN", "m"]].concat(S.devices.map((d) => [d.id.padEnd(12) + d.name.padEnd(17) + (d.online ? "now" : OMK.ago(d.lastSeen || 0)), ""]))],
       config: ["omakeyd config --name desk", () => [["name: desk · port: " + S.port, ""], ["Restart to apply: systemctl --user restart omakeyd", "m"]]],
       test: ["omakeyd test-client 'omakey://pair?…' --addr 127.0.0.1 --text \"hi\"", () => [["paired as test-client · session 9c41", "a"], ["typed 2 keys · ping 0.21 ms", ""], ["(acts as a phone, for testing without one)", "m"]]],

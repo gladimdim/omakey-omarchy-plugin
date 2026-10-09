@@ -115,7 +115,7 @@
           const confirming = ui.confirm === d.id, renaming = ui.renaming === d.id;
           const info = confirming ? '<span class="urgent">Forget this phone? It will need a new QR code.</span>'
             : renaming ? "<span>Enter to save, Esc to cancel</span>"
-            : "<span>" + (live ? "Connected · " + (d.transport === "bluetooth" ? "Bluetooth" : "Wi-Fi " + d.addr) + " · " + d.ping + " ms" +
+            : "<span>" + (live ? "Connected · " + "Wi-Fi " + d.addr + " · " + d.ping + " ms" +
               (d.loss >= 1 ? " · " + Math.round(d.loss) + "% lost" : "") + (d.held > 0 ? " · " + d.held + " held" : "")
               : "Last seen " + OMK.ago(d.lastSeen || Date.now() / 1000 - 60)) + "</span>";
           const acts = confirming ? '<button class="txt urgent" data-a="forget" data-id="' + d.id + '">Forget</button><button class="txt" data-a="keep">Keep</button>'
@@ -134,7 +134,7 @@
           '<label>UDP port (phones need a new QR code after a change)<input class="pt" value="' + S.port + '"></label>' +
           '<button class="wg-btn sec" data-a="savecfg" style="margin-top:2px">Save and restart</button></div>';
       }
-      h += '<div class="wg-foot"><span>' + (S.bluetooth === "on" ? "Bluetooth on" : "Bluetooth off (no adapter)") + "</span><span>" + esc(S.hostName) + " · UDP " + S.port + "</span></div>";
+      h += '<div class="wg-foot"><span>' + esc(S.hostName) + " · UDP " + S.port + "</span></div>";
       const focusRename = ui.renaming && !this.p.querySelector("input.rn");
       if (this.p.contains(document.activeElement) && document.activeElement.matches("input")) return; // don't clobber typing
       this.p.innerHTML = h;
@@ -202,7 +202,6 @@
       h += paired ? "<div class='card ok' data-a='open'><b>" + esc(S.hostName) + "</b><span>● connected · 4 ms · tap to type</span></div>" : "<div class='note' style='color:var(--p-dim)'>No computers yet.</div>";
       h += "<div class='sec'>Nearby</div>" + (paired ? "<div class='note' style='color:var(--p-dim)'>Looking for computers running omakeyd…</div>"
         : "<div class='card'><b>" + esc(S.hostName) + "</b><span>Not paired. Scan its pairing code to connect.</span></div>");
-      h += "<div class='sec'>Any computer</div><div class='note'>No omakeyd needed: the phone becomes a Bluetooth keyboard and touchpad.</div><button class='wide' data-a='bt'>Pair over Bluetooth</button>";
       if (this.toast) h += "<div style='position:absolute;left:8%;right:8%;bottom:4%;background:#000c;color:#fff;border-radius:20px;padding:.7em 1em;text-align:center'>" + esc(this.toast) + "</div>";
       this.cn.innerHTML = h;
     }
@@ -216,7 +215,6 @@
         if (!S.pairing || !S.clipboard) return this.say("The clipboard is empty. Copy the pairing link first.");
         return this.confirm();
       }
-      if (a === "bt") return this.say("Open Bluetooth settings on the computer and pair with “" + this.o.name + "”");
       if (a === "open") return this.say("Opening the keyboard…");
       if (a === "cancel-scan") { this.scanning = false; return this.render(); }
       if (a === "cancel") { this.dialog = false; return this.render(); }

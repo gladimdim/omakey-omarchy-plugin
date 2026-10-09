@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Omakey — your phone is the keyboard</title>
-<meta name="description" content="Omakey turns your Android phone into a real keyboard and touchpad for Omarchy: kernel-level key presses over encrypted Wi-Fi or Bluetooth, every Hyprland bind, any layout. Free and open source.">
+<meta name="description" content="Omakey turns your Android phone into a real keyboard and touchpad for Omarchy: kernel-level key presses over encrypted Wi-Fi, every Hyprland bind, any layout. Free and open source.">
 <link rel="canonical" href="https://gladimdim.github.io/omakey-omarchy-plugin/">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Omakey">
@@ -41,7 +41,6 @@
       <a href="#touchpad">Touchpad</a>
       <a href="#portrait">Portrait</a>
       <a href="#widget">Widget</a>
-      <a href="#bluetooth">Bluetooth</a>
       <a href="#layouts">Layouts</a>
       <a href="#security">Security</a>
     </nav>
@@ -54,12 +53,12 @@
     <div class="wrap">
       <a class="badge" href="#download"><b>1.3</b>Free and open source · Android + Omarchy + Steam Deck</a>
       <h1>Your phone is the keyboard.<br><span class="grad">A real one.</span></h1>
-      <p class="lede">Omakey turns your phone into a kernel-level keyboard and touchpad for Omarchy. Hold <span class="kbd">SUPER</span> <span class="kbd">SPACE</span>, press Esc and F1–F12, type into the lock screen — over encrypted Wi-Fi or Bluetooth.</p>
+      <p class="lede">Omakey turns your phone into a kernel-level keyboard and touchpad for Omarchy. Hold <span class="kbd">SUPER</span> <span class="kbd">SPACE</span>, press Esc and F1–F12, type into the lock screen — over encrypted Wi-Fi.</p>
       <div class="cta">
         <a class="btn primary" href="#download"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>Download for Android <small>APK · 5 MB</small></a>
         <a class="btn" href="#install">Install on Omarchy</a>
       </div>
-      <p class="platforms">Omarchy Linux · Android 10+ · Bluetooth keyboard for any computer · MIT · No accounts, no cloud</p>
+      <p class="platforms">Omarchy Linux · Android 10+ · MIT · No accounts, no cloud</p>
 
       <div class="demo-frame">
         <div class="try-hints" aria-label="Things to try">
@@ -86,7 +85,7 @@
       <div class="copy">
         <p class="eyebrow">A real keyboard</p>
         <h2>Key codes, not text boxes.</h2>
-        <p><code>omakeyd</code> creates a kernel virtual keyboard. Hyprland, games, terminals and the <strong>lock screen</strong> see key presses, exactly like a Bluetooth keyboard.</p>
+        <p><code>omakeyd</code> creates a kernel virtual keyboard. Hyprland, games, terminals and the <strong>lock screen</strong> see key presses, exactly like a USB keyboard.</p>
         <p>Your desktop's layout decides what a key types. <strong>Switch Omarchy to Ukrainian and the same keys type Cyrillic.</strong></p>
         <ul class="ticks">
           <li><b>Every bind works:</b> SUPER, Ctrl, Alt, Esc, F1–F12, arrows, media keys</li>
@@ -247,39 +246,6 @@
     </div>
   </section>
 
-  <section class="center reveal-up" id="bluetooth">
-    <div class="wrap">
-      <p class="eyebrow">Bluetooth, two ways</p>
-      <h2>Off Wi-Fi? Not on Omarchy? Still a keyboard.</h2>
-      <p class="sub">When Wi-Fi can't reach your desktop, Omakey falls back to Bluetooth with the same encrypted packets. And for any other computer, the phone becomes a plain Bluetooth keyboard and mouse.</p>
-      <div class="bt-grid">
-        <div class="bt-card" id="fallback">
-          <h3>Automatic fallback to omakeyd</h3>
-          <p>No extra pairing. A held key survives the switch, and Wi-Fi takes over again as soon as it answers.</p>
-          <div class="bt-sim">
-            <div class="end l"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="6" y="2" width="12" height="20" rx="3"/><path d="M11 18h2"/></svg>Phone</div>
-            <div class="path wifi"><span>Wi-Fi · UDP 47800</span></div>
-            <div class="path bt"><span>Bluetooth · RFCOMM</span></div>
-            <div class="end r"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>omakeyd</div>
-          </div>
-          <div class="bt-state"></div>
-          <div class="wire-ctl"><button type="button" class="ghost" data-b="hold">Hold Shift</button><button type="button" class="ghost" data-b="wifi">Turn Wi-Fi off</button></div>
-        </div>
-        <div class="bt-card" id="hid">
-          <h3>Bluetooth keyboard for anything</h3>
-          <p>Mac, Windows, iPad, a TV: pair the phone in its Bluetooth settings. Keyboard and touchpad, nothing to install.</p>
-          <div class="devices">
-            <button type="button" data-dev="Mac" aria-pressed="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="4" width="16" height="11" rx="1.5"/><path d="M2 19h20l-2-4H4z"/></svg>Mac</button>
-            <button type="button" data-dev="Windows PC" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>Windows</button>
-            <button type="button" data-dev="iPad" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="2" width="16" height="20" rx="2.5"/><path d="M11 19h2"/></svg>iPad</button>
-            <button type="button" data-dev="Smart TV" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="4" width="20" height="13" rx="1.5"/><path d="M7 21l5-4 5 4"/></svg>TV</button>
-          </div>
-          <div class="bt-screen"></div>
-          <div class="phone-host" style="margin-top:12px"></div>
-        </div>
-      </div>
-    </div>
-  </section>
 
   <section class="center reveal-up" id="layouts">
     <div class="wrap">
@@ -351,12 +317,11 @@
       <div class="get">
         <div>
           <h3>Android app <span class="ver">1.3.0</span></h3>
-          <p>Android 10 or newer. The keyboard, touchpad, portrait mode with your own keyboard, Copy and Paste with the computer's clipboard, layouts and Bluetooth keyboard mode.</p>
+          <p>Android 10 or newer. The keyboard, touchpad, portrait mode with your own keyboard, Copy and Paste with the computer's clipboard, and layouts.</p>
           <a class="btn primary" style="align-self:flex-start" href="https://github.com/gladimdim/omakey-mobile/releases/download/v1.3.0/omakey-1.3.0.apk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>Download omakey-1.3.0.apk</a>
           <ol>
             <li>Open the APK on your phone and allow <b>Install unknown apps</b> for your browser or file manager.</li>
             <li>Open Omakey, tap <b>Scan QR code</b>.</li>
-            <li>Or, for any computer: <b>Pair over Bluetooth</b>.</li>
           </ol>
           <div class="meta"><b>Signing certificate SHA-256</b><br>8B:E4:25:A4:31:79:FB:FB:08:C2:31:3F:4B:C3:0C:26:F7:55:CA:44:BC:C7:22:EE:96:31:A6:77:45:B7:2D:36<br><a href="https://github.com/gladimdim/omakey-mobile/releases">All releases and checksums →</a></div>
         </div>

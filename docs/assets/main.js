@@ -99,8 +99,6 @@
   /* ── Small demos ────────────────────────────────────────── */
   OMK.initTimeline($("#timeline"));
   OMK.initWire($("#wire"));
-  OMK.initFallback($("#fallback"));
-  OMK.initHid($("#hid"));
   OMK.initGallery($("#gallery"));
   OMK.initCli($("#cli-box"));
   OMK.initPortrait($("#portrait"));
