@@ -8,6 +8,7 @@ mod net;
 mod notify;
 mod protocol;
 mod qr;
+mod seat;
 mod server;
 mod store;
 mod theme;
@@ -152,7 +153,11 @@ fn status(as_json: bool) -> Result<(), String> {
     println!("omakeyd on UDP {} as \"{}\"", s["port"], s["host_name"].as_str().unwrap_or(""));
     let addrs: Vec<&str> = s["addresses"].as_array().map(|a| a.iter().filter_map(|x| x.as_str()).collect()).unwrap_or_default();
     println!("Addresses: {}", if addrs.is_empty() { "none (no network?)".into() } else { addrs.join(", ") });
-    println!("Keyboard: {}", s["uinput"].as_str().unwrap_or("?"));
+    match s["uinput"].as_str() {
+        Some("away") => println!("Keyboard: away (another user's session is in front; it comes back with yours)"),
+        Some(k) => println!("Keyboard: {k}"),
+        None => println!("Keyboard: ?"),
+    }
     let bt = &s["bluetooth"];
     match bt["state"].as_str() {
         Some("on") => println!("Bluetooth: on ({})", bt["address"].as_str().unwrap_or("")),

@@ -8,6 +8,7 @@ use crate::protocol::*;
 use crate::server::*;
 use crate::store::Devices;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Once};
 use std::time::{Duration, Instant};
 
@@ -27,6 +28,8 @@ struct Rig {
     server: Server,
     shared: Arc<Mutex<Shared>>,
     rec: Recorder,
+    /// The seat watcher's flag: whether our session is in front.
+    in_front: Arc<AtomicBool>,
     client: Client,
     addr: SocketAddr,
     t0: Instant,
@@ -50,11 +53,14 @@ impl Rig {
             expires_unix: 0,
         });
         let rec = Recorder::default();
-        let server = Server::new(shared.clone(), Keyboard::new(Box::new(rec.clone())), "desk".into());
+        let in_front = Arc::new(AtomicBool::new(true));
+        let kb = Keyboard::gated(Some(Box::new(rec.clone())), in_front.clone());
+        let server = Server::new(shared.clone(), kb, "desk".into());
         Rig {
             server,
             shared,
             rec,
+            in_front,
             client: Client::new(device_id, key),
             addr: "192.168.1.9:5000".parse().unwrap(),
             t0,
@@ -658,4 +664,48 @@ fn copy_without_a_reachable_clipboard_still_presses_ctrl_insert_and_fails_fast()
     assert_eq!(r.get(4, CLIP_COPY), Err(CLIP_FAILED));
     assert!(t.elapsed() < Duration::from_millis(500), "no waiting for a change that can't be seen");
     assert_eq!(r.rec.take(), vec![(CTRL, true), (INSERT, true), (INSERT, false), (CTRL, false)]);
+}
+
+#[test]
+fn nothing_is_typed_while_another_users_session_is_in_front() {
+    let mut r = Rig::new();
+    r.connect();
+    r.key(META, true, 0);
+    assert_eq!(r.rec.take(), vec![(META, true)]);
+
+    // Another user switches in: the watcher clears the flag first, and
+    // from then on not a key or a motion reaches the old device.
+    r.in_front.store(false, Ordering::SeqCst);
+    r.key(A, true, 10);
+    r.key(A, false, 20);
+    let pkt = r.client.pointer(Pointer { dx: 5, ..Default::default() }, 30).unwrap();
+    r.send(pkt, 30);
+    assert!(r.rec.take().is_empty());
+    assert!(r.rec.1.lock().unwrap().is_empty());
+    assert_eq!(r.server.session_infos(r.t0).len(), 1, "the phone stays connected");
+
+    // Then the main loop removes the device. Nothing is held on it any more.
+    r.server.set_device(None);
+    assert!(!r.server.has_device() && !r.server.key_down(META));
+    r.key(SPACE, true, 40);
+    assert!(r.rec.take().is_empty());
+}
+
+#[test]
+fn back_in_front_the_new_device_gets_what_the_phone_still_holds() {
+    let mut r = Rig::new();
+    r.connect();
+    r.key(META, true, 0);
+    r.rec.take();
+    r.in_front.store(false, Ordering::SeqCst);
+    r.server.set_device(None);
+
+    r.in_front.store(true, Ordering::SeqCst);
+    let fresh = Recorder::default();
+    r.server.set_device(Some(Box::new(fresh.clone())));
+    r.key(SPACE, true, 50);
+    let mut got = fresh.take();
+    got.sort();
+    assert_eq!(got, vec![(SPACE, true), (META, true)]);
+    assert!(r.rec.take().is_empty(), "the old device is gone");
 }

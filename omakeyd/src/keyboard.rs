@@ -4,6 +4,8 @@
 use crate::protocol::{LED_CAPS, LED_NUM, LED_SCROLL};
 use std::io;
 use std::os::fd::{AsRawFd, OwnedFd};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 pub const KEY_MAX: u16 = 0x2ff;
 
@@ -285,27 +287,63 @@ impl KeySink for LogSink {
 }
 
 pub struct Keyboard {
-    sink: Box<dyn KeySink + Send>,
+    /// None while there's no device: another user's session is in front.
+    sink: Option<Box<dyn KeySink + Send>>,
     count: Vec<u8>,
+    /// Cleared by the seat watcher the moment another session comes to the
+    /// front; nothing is written from then on, before the device goes.
+    in_front: Arc<AtomicBool>,
 }
 
 impl Keyboard {
+    #[cfg(test)]
     pub fn new(sink: Box<dyn KeySink + Send>) -> Keyboard {
-        Keyboard { sink, count: vec![0; KEY_MAX as usize + 1] }
+        Keyboard::gated(Some(sink), Arc::new(AtomicBool::new(true)))
+    }
+
+    /// A keyboard that types only while `in_front` is set.
+    pub fn gated(sink: Option<Box<dyn KeySink + Send>>, in_front: Arc<AtomicBool>) -> Keyboard {
+        Keyboard { sink, count: vec![0; KEY_MAX as usize + 1], in_front }
+    }
+
+    /// The device, if there is one and its keys may reach the seat.
+    fn live(&mut self) -> Option<&mut Box<dyn KeySink + Send>> {
+        if self.in_front.load(Ordering::SeqCst) {
+            self.sink.as_mut()
+        } else {
+            None
+        }
+    }
+
+    pub fn in_front(&self) -> bool {
+        self.in_front.load(Ordering::SeqCst)
+    }
+
+    pub fn has_device(&self) -> bool {
+        self.sink.is_some()
+    }
+
+    /// Swap the device. Nothing is held on the new one; dropping the old one
+    /// removes it, and the kernel lets go of its keys.
+    pub fn set_device(&mut self, sink: Option<Box<dyn KeySink + Send>>) {
+        self.sink = sink;
+        self.count.fill(0);
     }
 
     /// Current lock LEDs (protocol LED_* bits), when the device reports them.
     pub fn leds(&mut self) -> Option<u8> {
-        self.sink.leds()
+        self.live()?.leds()
     }
 
     pub fn press(&mut self, code: u16) {
-        let c = &mut self.count[code as usize];
-        if *c == 0 {
-            if let Err(e) = self.sink.key(code, true) {
+        let down = self.count[code as usize] > 0;
+        if !down {
+            let Some(sink) = self.live() else { return };
+            if let Err(e) = sink.key(code, true) {
                 eprintln!("omakeyd: uinput write failed: {e}");
             }
         }
+        let c = &mut self.count[code as usize];
         *c = c.saturating_add(1);
     }
 
@@ -316,15 +354,19 @@ impl Keyboard {
         }
         *c -= 1;
         if *c == 0 {
-            if let Err(e) = self.sink.key(code, false) {
-                eprintln!("omakeyd: uinput write failed: {e}");
+            if let Some(sink) = self.live() {
+                if let Err(e) = sink.key(code, false) {
+                    eprintln!("omakeyd: uinput write failed: {e}");
+                }
             }
         }
     }
 
     pub fn pointer(&mut self, p: crate::protocol::Pointer) {
-        if let Err(e) = self.sink.pointer(p) {
-            eprintln!("omakeyd: uinput write failed: {e}");
+        if let Some(sink) = self.live() {
+            if let Err(e) = sink.pointer(p) {
+                eprintln!("omakeyd: uinput write failed: {e}");
+            }
         }
     }
 

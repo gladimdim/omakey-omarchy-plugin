@@ -3,7 +3,7 @@
 
 use crate::clipboard::{ClipError, Clipboard, Contents, Done, Job, Text};
 use crate::hypr::KeyboardLayout;
-use crate::keyboard::{allowed, is_modifier, Keyboard};
+use crate::keyboard::{allowed, is_modifier, KeySink, Keyboard};
 use crate::protocol::*;
 use crate::store::{hex, unix_now, Device, Devices};
 use aes_gcm::Aes256Gcm;
@@ -77,6 +77,9 @@ pub struct Shared {
     pub paired: (u64, String),
     pub sessions: Vec<SessionInfo>,
     pub bluetooth: BtStatus,
+    /// The virtual keyboard: "ok", "away" (another user's session is in
+    /// front at the seat), "unavailable" (can't open /dev/uinput) or "dry-run".
+    pub uinput: &'static str,
     /// Set when devices, pairing or Bluetooth changed: rewrite state.json.
     pub dirty: bool,
     /// devices.json needs saving; `save_now` skips the debounce (pairing).
@@ -94,6 +97,7 @@ impl Shared {
             paired: (0, String::new()),
             sessions: Vec::new(),
             bluetooth: BtStatus::default(),
+            uinput: "",
             dirty: true,
             devices_dirty: false,
             save_now: false,
@@ -741,6 +745,26 @@ impl Server {
         for s in self.sessions.values_mut().filter(|s| &s.addr == peer) {
             Self::release_all(&mut self.kb, s);
         }
+        self.changed = true;
+    }
+
+    /// Whether the seat's session in front is ours (see seat.rs).
+    pub fn in_front(&self) -> bool {
+        self.kb.in_front()
+    }
+
+    pub fn has_device(&self) -> bool {
+        self.kb.has_device()
+    }
+
+    /// Swap the virtual devices: None while another user's session is in
+    /// front. The sessions stay, holding nothing; the next INPUT presses
+    /// what the phone still holds on the new device.
+    pub fn set_device(&mut self, sink: Option<Box<dyn KeySink + Send>>) {
+        for s in self.sessions.values_mut() {
+            s.pressed.clear();
+        }
+        self.kb.set_device(sink);
         self.changed = true;
     }
 

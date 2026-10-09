@@ -7,6 +7,7 @@ use crate::keyboard::{Keyboard, KeySink, LogSink, Uinput};
 use crate::net::UdpServer;
 use crate::notify::Notifier;
 use crate::protocol::{fingerprint, random_bytes, DeviceId, MAX_DATAGRAM};
+use crate::seat;
 use crate::server::{BtStatus, Pending, Server, SessionInfo, Shared, PAIRING_TTL};
 use crate::store::{self, hex, unix_now, Config, Device, Devices};
 use crate::theme::ThemeWatch;
@@ -69,7 +70,6 @@ struct Context {
     host_id: DeviceId,
     host_name: String,
     port: u16,
-    uinput: String,
     state_path: PathBuf,
 }
 
@@ -80,14 +80,20 @@ pub fn run(port_override: Option<u16>, dry_run: bool) -> Result<(), String> {
     let host_name = store::host_name(&config);
     let runtime = store::ensure_runtime_dir()?;
 
-    let sink: Box<dyn KeySink + Send> = if dry_run {
-        Box::new(LogSink)
-    } else {
-        Box::new(Uinput::open().map_err(|e| {
+    // The devices exist only while our session is in front at the seat:
+    // another user's session there would read them too.
+    let in_front = if dry_run { Arc::new(AtomicBool::new(true)) } else { seat::watch() };
+    let sink: Option<Box<dyn KeySink + Send>> = if dry_run {
+        Some(Box::new(LogSink))
+    } else if in_front.load(Ordering::SeqCst) {
+        Some(Box::new(Uinput::open().map_err(|e| {
             format!(
                 "can't open /dev/uinput ({e}). Run install.sh to add the udev rule, then log out and back in."
             )
-        })?)
+        })?))
+    } else {
+        eprintln!("omakeyd: another session is in front at the seat; the keyboard appears when yours is");
+        None
     };
 
     let socket = UdpServer::bind(port)?;
@@ -95,7 +101,7 @@ pub fn run(port_override: Option<u16>, dry_run: bool) -> Result<(), String> {
     let shared = Arc::new(Mutex::new(Shared::new(Devices::load())));
     // Shared with the Bluetooth connection threads; the UDP loop below holds
     // it only while handling one packet.
-    let server = Arc::new(Mutex::new(Server::new(shared.clone(), Keyboard::new(sink), host_name.clone())));
+    let server = Arc::new(Mutex::new(Server::new(shared.clone(), Keyboard::gated(sink, in_front), host_name.clone())));
     // A real keyboard only: a dry run has no device for Hyprland to switch,
     // and only prints the keys a copy or paste would press.
     if !dry_run {
@@ -113,7 +119,6 @@ pub fn run(port_override: Option<u16>, dry_run: bool) -> Result<(), String> {
         host_id,
         host_name: host_name.clone(),
         port,
-        uinput: if dry_run { "dry-run".into() } else { "ok".into() },
         state_path: runtime.join("state.json"),
     });
 
@@ -157,6 +162,8 @@ pub fn run(port_override: Option<u16>, dry_run: bool) -> Result<(), String> {
     let mut last_tick = Instant::now();
     let mut last_publish = Instant::now() - Duration::from_secs(10);
     let mut theme_watch = ThemeWatch::new();
+    let mut uinput_retry = None;
+    let mut shared_uinput = "";
 
     while !STOP.load(Ordering::SeqCst) {
         match socket.recv(&mut buf) {
@@ -179,8 +186,11 @@ pub fn run(port_override: Option<u16>, dry_run: bool) -> Result<(), String> {
             sh.expire_pending(now);
             (std::mem::take(&mut sh.forgotten), std::mem::take(&mut sh.dirty))
         };
-        let (seen, sessions) = {
+        let (seen, sessions, keyboard) = {
             let mut srv = server.lock().unwrap();
+            if !dry_run {
+                follow_seat(&mut srv, &mut uinput_retry, now);
+            }
             for id in &forgotten {
                 srv.drop_device(id);
             }
@@ -196,10 +206,22 @@ pub fn run(port_override: Option<u16>, dry_run: bool) -> Result<(), String> {
                 srv.changed = false;
                 srv.session_infos(now)
             });
-            (srv.take_seen(), sessions)
+            let keyboard = match (dry_run, srv.has_device(), srv.in_front()) {
+                (true, ..) => "dry-run",
+                (false, true, _) => "ok",
+                (false, false, true) => "unavailable",
+                (false, false, false) => "away",
+            };
+            (srv.take_seen(), sessions, keyboard)
         };
-        if !seen.is_empty() || sessions.is_some() {
+        let keyboard_changed = keyboard != shared_uinput;
+        if !seen.is_empty() || sessions.is_some() || keyboard_changed {
             let mut sh = shared.lock().unwrap();
+            if keyboard_changed {
+                sh.uinput = keyboard;
+                sh.dirty = true;
+                shared_uinput = keyboard;
+            }
             sh.mark_seen(&seen);
             if let Some(s) = sessions {
                 sh.sessions = s;
@@ -232,6 +254,37 @@ pub fn run(port_override: Option<u16>, dry_run: bool) -> Result<(), String> {
     write_state(&ctx, false);
     let _ = std::fs::remove_file(runtime.join("ctl.sock"));
     Ok(())
+}
+
+/// Remove the virtual devices while another user's session is in front at
+/// the seat, and bring them back once ours is. Opening can fail for a moment
+/// after the switch, until logind gives /dev/uinput back: retry every second,
+/// saying so once.
+fn follow_seat(srv: &mut Server, retry: &mut Option<Instant>, now: Instant) {
+    if !srv.in_front() {
+        *retry = None;
+        if srv.has_device() {
+            srv.set_device(None);
+            eprintln!("omakeyd: another session is in front at the seat; keyboard removed");
+        }
+        return;
+    }
+    if srv.has_device() || retry.is_some_and(|t| now < t) {
+        return;
+    }
+    match Uinput::open() {
+        Ok(u) => {
+            srv.set_device(Some(Box::new(u)));
+            *retry = None;
+            eprintln!("omakeyd: your session is in front again; keyboard back");
+        }
+        Err(e) => {
+            if retry.is_none() {
+                eprintln!("omakeyd: can't open /dev/uinput yet ({e}); retrying");
+            }
+            *retry = Some(now + Duration::from_secs(1));
+        }
+    }
 }
 
 /// Write devices.json if it changed: right away after pairing, forget or
@@ -308,6 +361,7 @@ struct Snapshot {
     pending: Option<(String, u64, [u8; 32])>,
     paired: (u64, String),
     bluetooth: BtStatus,
+    uinput: &'static str,
 }
 
 fn snapshot(ctx: &Context) -> Snapshot {
@@ -318,6 +372,7 @@ fn snapshot(ctx: &Context) -> Snapshot {
         pending: sh.pending.as_ref().map(|p| (p.uri.clone(), p.expires_unix, p.key)),
         paired: sh.paired.clone(),
         bluetooth: sh.bluetooth.clone(),
+        uinput: sh.uinput,
     }
 }
 
@@ -354,7 +409,7 @@ fn state_json(ctx: &Context, running: bool) -> serde_json::Value {
         "host_name": ctx.host_name,
         "port": ctx.port,
         "addresses": addresses().iter().map(|a| a.to_string()).collect::<Vec<_>>(),
-        "uinput": ctx.uinput,
+        "uinput": snap.uinput,
         "bluetooth": {
             "state": bt.state,
             "address": bt.address.as_ref().map(bluetooth::address_text),

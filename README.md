@@ -195,6 +195,11 @@ phone ──UDP 47800, AES-GCM──▶ omakeyd ──▶ /dev/uinput ──▶ 
 - The udev rule gives the logged-in user access to `/dev/uinput`, the same
   rule Steam uses for controllers. Any program running as you can then
   create input devices.
+- `omakeyd` types only while your session is the one in front at the seat
+  (logind's `seat0`). When another user switches in, it removes the virtual
+  keyboard and mouse at once, so a phone paired with your account can't type
+  into their session; they come back when you switch back. `omakeyd status`
+  says `Keyboard: away` meanwhile.
 - `omakeyd` needs `XDG_RUNTIME_DIR` (any login session has it) and won't
   fall back to `/tmp`, where another user could plant its socket.
 - The firewall rules only let in private and Tailscale addresses, and
