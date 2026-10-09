@@ -433,7 +433,7 @@
     }
   }
 
-  /* ═══ KeyStrip: digits, F-keys, navigation and system keys, swiped sideways ═══ */
+  /* ═══ KeyStrip: your own row of keys, above pages swiped sideways ═══ */
   const PAGES = [
     "1234567890".split("").map((c) => [c, "KEY_" + c]),
     Array.from({ length: 12 }, (_, i) => ["F" + (i + 1), "KEY_F" + (i + 1)]),
@@ -442,19 +442,56 @@
     [["Super", "KEY_LEFTMETA", 1], ["Ctrl", "KEY_LEFTCTRL", 1], ["Alt", "KEY_LEFTALT", 1], ["Shift", "KEY_LEFTSHIFT", 1], ["PrtSc", "KEY_SYSRQ"],
       ["Menu", "KEY_COMPOSE"], ["Mute", "KEY_MUTE"], ["Vol−", "KEY_VOLUMEDOWN"], ["Vol+", "KEY_VOLUMEUP"], ["⏯", "KEY_PLAYPAUSE"]],
   ];
+  // Every key once, by code: the upper row holds the same keys as the pages.
+  const CATALOG = new Map(PAGES.flat().map((k) => [k[1], k]));
+  const SLOTS = 10;
+  const SLOTS_KEY = "omakey.strip.slots";
+  // The app's row starts empty; here it starts with a few keys, so you see it in use.
+  const DEFAULT_SLOTS = ["KEY_ESC", "KEY_TAB", "KEY_LEFT", "KEY_UP", "KEY_DOWN", "KEY_RIGHT", "KEY_LEFTMETA", "KEY_LEFTCTRL", null, null];
+  // Drop [code], dragged from slot [from] (-1: the pages), on slot [to] (-1: off the row). A key in the way
+  // swaps places with it, so the row never holds a key twice; one dragged off the row leaves its slot empty (StripSlots).
+  const dropKey = (slots, code, from, to) => {
+    if (to < 0) { if (from >= 0) slots[from] = null; return; }
+    // From the pages but already in the row: moved from where it is.
+    const src = from >= 0 ? from : slots.indexOf(code);
+    const displaced = slots[to];
+    slots[to] = code;
+    if (src >= 0 && src !== to) slots[src] = displaced;
+  };
+  // Long labels get smaller type, so "Super" fits a slot.
+  const fit = (label) => (label.length >= 5 ? " l5" : label.length === 4 ? " l4" : label.length > 1 ? " l2" : "");
+  const keyHtml = (k, i, cls) => '<button type="button" data-code="' + k[1] + '" class="' + ((k[2] ? "mod" : "") + (cls || "")).trim() + '" style="--i:' + i + '">' + k[0] + "</button>";
+  const PENCIL = '<svg class="pen" viewBox="0 0 24 24" aria-hidden="true"><g transform="rotate(45 12 12)"><rect x="9.5" y="5" width="5" height="11"/><path d="M9.5 16 12 20l2.5-4M9.5 7.5h5"/></g></svg>';
+  const TICK = '<svg class="tick" viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 12.5l4 4L18 8"/></svg>';
+  const buzz = () => { if (navigator.vibrate) { try { navigator.vibrate(6); } catch (_) {} } };
+
   class KeyStrip {
-    /* o: tap(code), mod(code, down) */
+    /* o: tap(code), mod(code, down, cancel), onSwipe(), onEdit() (a key put on the row) */
     constructor(host, o) {
       this.o = o;
       this.cur = 0;
+      this.editing = false;
+      this.drag = null;
+      this.latched = new Set();
+      this.slots = this.load();
       this.root = el("div", "ks");
-      this.root.innerHTML = '<div class="ks-view"><div class="ks-track">' + PAGES.map((p) => '<div class="ks-page">' +
-        p.map((k) => '<button type="button" data-code="' + k[1] + '"' + (k[2] ? ' class="mod"' : "") + ">" + k[0] + "</button>").join("") + "</div>").join("") +
-        '</div></div><div class="ks-dots">' + PAGES.map(() => "<i></i>").join("") + "<b></b></div>";
+      this.root.innerHTML =
+        '<div class="ks-row"><div class="ks-slots"></div><span class="ks-hint"></span>' +
+        '<button type="button" class="ks-edit" aria-pressed="false" aria-label="Choose keys for this row">' + PENCIL + TICK + "</button></div>" +
+        '<div class="ks-view"><div class="ks-track">' + PAGES.map((p, n) => '<div class="ks-page" data-p="' + n + '">' +
+        p.map((k, i) => keyHtml(k, i)).join("") + "</div>").join("") +
+        '</div></div><div class="ks-dots">' + PAGES.map(() => "<i></i>").join("") + '<b></b></div><div class="ks-drag" aria-hidden="true"></div>';
       host.appendChild(this.root);
+      this.row = $(".ks-row", this.root);
+      this.slotsEl = $(".ks-slots", this.root);
+      this.hint = $(".ks-hint", this.root);
+      this.editBtn = $(".ks-edit", this.root);
       this.view = $(".ks-view", this.root);
       this.track = $(".ks-track", this.root);
       this.pill = $(".ks-dots b", this.root);
+      this.float = $(".ks-drag", this.root);
+      this.editBtn.addEventListener("click", () => this.edit(!this.editing));
+      this.renderRow();
       this.bind();
       this.go(0, true);
     }
@@ -469,28 +506,155 @@
       this.track.style.transform = "translateX(" + -px + "px)";
       this.pill.style.transform = "translateX(" + (px / w) * 12 + "px)";
     }
-    paint(latched) { $$("button.mod", this.root).forEach((b) => b.classList.toggle("latched", latched.has(b.dataset.code))); }
+    // A latched modifier shows latched in both rows.
+    paint(latched) {
+      this.latched = latched;
+      $$("button.mod", this.root).forEach((b) => b.classList.toggle("latched", latched.has(b.dataset.code)));
+    }
+    // The button for a key: in the upper row when it's there, else on its page, which comes into view.
+    key(code) {
+      const top = $('.ks-slot button[data-code="' + code + '"]', this.root);
+      if (top) return top;
+      const b = $('.ks-page button[data-code="' + code + '"]', this.root);
+      if (b) this.go(+b.closest(".ks-page").dataset.p);
+      return b;
+    }
+
+    /* ── the upper row ── */
+    load() {
+      try {
+        const s = JSON.parse(localStorage.getItem(SLOTS_KEY));
+        if (Array.isArray(s) && s.length === SLOTS) return s.map((c, i) => (CATALOG.has(c) && s.indexOf(c) === i ? c : null));
+      } catch (_) {}
+      return DEFAULT_SLOTS.slice();
+    }
+    save() { try { localStorage.setItem(SLOTS_KEY, JSON.stringify(this.slots)); } catch (_) {} }
+    // While a key is dragged, the row as it would be if dropped where it is; its landing slot an accent outline.
+    renderRow() {
+      const d = this.drag;
+      const shown = this.slots.slice();
+      if (d) dropKey(shown, d.code, d.from, d.to);
+      this.slotsEl.innerHTML = shown.map((c, i) => {
+        if (!c || (d && c === d.code)) return '<div class="ks-slot' + (c ? " landing" : "") + '" data-i="' + i + '"></div>';
+        const k = CATALOG.get(c);
+        return '<div class="ks-slot" data-i="' + i + '">' + keyHtml(k, i, fit(k[0]) + (this.latched.has(c) ? " latched" : "")) + "</div>";
+      }).join("");
+      // A first look: say how to fill it.
+      const empty = !d && shown.every((c) => !c);
+      this.hint.classList.toggle("on", empty);
+      this.hint.innerHTML = empty ? "<span>" + (this.editing ? "Drag keys up here" : "Tap the pencil to choose keys for this row") + "</span>" : "";
+    }
+    // The pencil starts arranging the row; the tick is done.
+    edit(on) {
+      if (on === this.editing) return;
+      this.editing = on;
+      this.root.classList.toggle("editing", on);
+      this.editBtn.setAttribute("aria-pressed", String(on));
+      this.editBtn.setAttribute("aria-label", on ? "Done" : "Choose keys for this row");
+      buzz();
+      this.renderRow();
+    }
+    changed(before, added) {
+      this.renderRow();
+      if (this.slots.join() === before) return;
+      this.save();
+      if (added) this.o.onEdit && this.o.onEdit();
+    }
+    // A tap while editing: a key on the row leaves it, one on the pages takes the first empty slot.
+    editTap(g) {
+      g.b.classList.remove("down");
+      const code = g.b.dataset.code, before = this.slots.join();
+      if (g.top) this.slots[+g.b.closest(".ks-slot").dataset.i] = null;
+      else {
+        const i = this.slots.indexOf(null);
+        if (i >= 0 && !this.slots.includes(code)) this.slots[i] = code;
+      }
+      this.changed(before, !g.top);
+    }
+    // The upper row's slot under x, the nearest one past either end; -1 below the row.
+    dropSlot(x, y) {
+      if (y >= this.row.getBoundingClientRect().bottom) return -1;
+      const r = this.slotsEl.getBoundingClientRect();
+      return Math.max(0, Math.min(SLOTS - 1, Math.floor(((x - r.left) / r.width) * SLOTS)));
+    }
+    startDrag(f, from, x, y) {
+      clearTimeout(f.pick);
+      f.b.classList.remove("down");
+      f.drag = true;
+      const code = f.b.dataset.code;
+      this.drag = { code, from, to: from };
+      // Raised above the finger and a little larger than a slot.
+      const s = this.slotsEl.firstElementChild.getBoundingClientRect();
+      this.float.style.width = s.width * 1.15 + "px";
+      this.float.style.height = s.height * 1.15 + "px";
+      this.float.textContent = CATALOG.get(code)[0];
+      this.float.classList.add("on");
+      buzz();
+      this.renderRow();
+      this.moveDrag(x, y);
+    }
+    moveDrag(x, y) {
+      const d = this.drag, box = this.root.getBoundingClientRect();
+      const lift = box.width * 0.05;
+      const w = this.float.offsetWidth, h = this.float.offsetHeight;
+      const cx = Math.max(w / 2, Math.min(box.width - w / 2, x - box.left));
+      const cy = Math.max(h / 2, Math.min(box.height - h / 2, y - lift - box.top));
+      this.float.style.transform = "translate(" + (cx - w / 2).toFixed(1) + "px," + (cy - h / 2).toFixed(1) + "px)";
+      const to = this.dropSlot(x, y - lift);
+      // Faded where dropping clears it.
+      this.float.classList.toggle("off", to < 0);
+      if (to !== d.to) { d.to = to; buzz(); this.renderRow(); }
+    }
+    endDrag(keep) {
+      const d = this.drag;
+      this.drag = null;
+      this.float.classList.remove("on", "off");
+      const before = this.slots.join();
+      if (keep) dropKey(this.slots, d.code, d.from, d.to);
+      this.changed(before, d.from < 0 && d.to >= 0);
+    }
+
+    /* ── touch ── */
     bind() {
-      const v = this.view;
+      const root = this.root, v = this.view;
       let f = null;
-      v.addEventListener("pointerdown", (e) => {
-        if (e.button > 0) return;
+      root.addEventListener("pointerdown", (e) => {
+        if (e.button > 0 || e.target.closest(".ks-edit")) return;
+        const top = !!e.target.closest(".ks-row");
+        if (!top && !e.target.closest(".ks-view")) return;
         e.preventDefault();
         const b = e.target.closest("button");
-        if (f) { // a second finger: a key while the first holds a modifier
-          if (b) this.press(b, e.pointerId);
+        if (f) { // a second finger: a key while the first holds a modifier; not while editing
+          if (b && !this.editing) this.press(b, e.pointerId);
           return;
         }
-        try { v.setPointerCapture(e.pointerId); } catch (_) {}
-        f = { id: e.pointerId, x: e.clientX, t: performance.now(), b, swiping: false, start: this.cur * v.clientWidth };
-        if (b) this.press(b, e.pointerId);
+        try { root.setPointerCapture(e.pointerId); } catch (_) {}
+        const g = f = { id: e.pointerId, x: e.clientX, y: e.clientY, lx: e.clientX, ly: e.clientY, t: performance.now(), b, top, swiping: false, start: this.cur * v.clientWidth };
+        if (!b) return;
+        if (!this.editing) return this.press(b, e.pointerId);
+        // Editing: nothing types. A key on the pages held still is picked up, not only one dragged up.
+        b.classList.add("down");
+        buzz();
+        if (!top) g.pick = setTimeout(() => { if (f === g && !g.swiping && !g.drag) this.startDrag(g, -1, g.lx, g.ly); }, 300);
       });
-      v.addEventListener("pointermove", (e) => {
+      root.addEventListener("pointermove", (e) => {
         if (!f || e.pointerId !== f.id) return;
-        const dx = e.clientX - f.x;
+        f.lx = e.clientX; f.ly = e.clientY;
+        if (f.drag) return this.moveDrag(e.clientX, e.clientY);
+        const dx = e.clientX - f.x, dy = e.clientY - f.y;
+        if (f.top) {
+          // The upper row doesn't swipe; while editing, a key slid along it moves.
+          if (this.editing && f.b && Math.hypot(dx, dy) > 10) this.startDrag(f, +f.b.closest(".ks-slot").dataset.i, e.clientX, e.clientY);
+          return;
+        }
+        if (this.editing && f.b && !f.swiping && Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) {
+          // Editing: up (or down) picks a key off the page; sideways still swipes.
+          return this.startDrag(f, -1, e.clientX, e.clientY);
+        }
         if (!f.swiping && Math.abs(dx) > 10) {
           f.swiping = true;
-          if (f.b) this.cancel(f.b);
+          clearTimeout(f.pick);
+          if (f.b) { if (this.editing) f.b.classList.remove("down"); else this.cancel(f.b); }
           this.track.style.transition = "none";
         }
         if (f.swiping) this.setOffset(Math.max(-30, Math.min((PAGES.length - 1) * v.clientWidth + 30, f.start - dx)));
@@ -498,6 +662,8 @@
       const up = (e) => {
         if (!f || e.pointerId !== f.id) { if (this.downs && this.downs.has(e.pointerId)) this.release(e.pointerId); return; }
         const g = f; f = null;
+        clearTimeout(g.pick);
+        if (g.drag) return this.endDrag(true);
         if (g.swiping) {
           const dx = e.clientX - g.x, fast = Math.abs(dx) / Math.max(1, performance.now() - g.t) > 0.35;
           const target = fast ? this.cur + (dx < 0 ? 1 : -1) : Math.round((g.start - dx) / v.clientWidth);
@@ -505,21 +671,31 @@
           this.o.onSwipe && this.o.onSwipe();
           return;
         }
+        if (this.editing) { if (g.b) this.editTap(g); return; }
         this.release(e.pointerId);
       };
-      v.addEventListener("pointerup", up);
-      v.addEventListener("pointercancel", (e) => { if (f && f.id === e.pointerId) { if (f.b) this.cancel(f.b); f = null; } });
+      root.addEventListener("pointerup", up);
+      root.addEventListener("pointercancel", (e) => {
+        if (!f || f.id !== e.pointerId) return;
+        clearTimeout(f.pick);
+        if (f.drag) this.endDrag(false);
+        else if (f.b) { if (this.editing) f.b.classList.remove("down"); else this.cancel(f.b); }
+        if (f.swiping) this.go(this.cur);
+        f = null;
+      });
       new ResizeObserver(() => this.go(this.cur, true)).observe(v);
     }
+    // The same key in both rows shows pressed.
+    mark(b, on) { $$('button[data-code="' + b.dataset.code + '"]', this.root).forEach((x) => x.classList.toggle("down", on)); }
     press(b, pid) {
       this.downs = this.downs || new Map();
       this.downs.set(pid, b);
-      b.classList.add("down");
-      if (navigator.vibrate) { try { navigator.vibrate(6); } catch (_) {} }
+      this.mark(b, true);
+      buzz();
       if (b.classList.contains("mod")) this.o.mod(b.dataset.code, true);
     }
     cancel(b) {
-      b.classList.remove("down");
+      this.mark(b, false);
       for (const [pid, x] of this.downs || []) if (x === b) this.downs.delete(pid);
       if (b.classList.contains("mod")) this.o.mod(b.dataset.code, false, true);
     }
@@ -528,7 +704,7 @@
       const b = this.downs && this.downs.get(pid);
       if (!b) return;
       this.downs.delete(pid);
-      b.classList.remove("down");
+      this.mark(b, false);
       if (b.classList.contains("mod")) this.o.mod(b.dataset.code, false);
       else this.o.tap(b.dataset.code);
     }
@@ -681,6 +857,7 @@
         mod: (code, down, cancel) => (down ? this.mods.down(code) : this.mods.up(code, cancel)),
         tap: (code) => { send(code, true); send(code, false); this.mods.used(); o.onAction("strip"); },
         onSwipe: () => o.onAction("strip-swipe"),
+        onEdit: () => o.onAction("strip-edit"),
       });
 
       root.addEventListener("click", (e) => {
@@ -749,6 +926,7 @@
         if (a === "suggestion" || a === "autocorrect") hintDone("fix");
         if (a === "swipe") hintDone("swipe");
         if (a === "strip-swipe") hintDone("strip");
+        if (a === "strip-edit") hintDone("edit");
       },
     });
     paintLog();
@@ -761,7 +939,7 @@
 
     // Scripted demos.
     let busy = false;
-    const run = (fn) => { if (busy) return; busy = true; phone.showKb(true); desk.focus(desk.wins.find((w) => w.type === "chat") || desk.wins[0]); fn(() => (busy = false)); };
+    const run = (fn) => { if (busy) return; busy = true; phone.strip.edit(false); phone.showKb(true); desk.focus(desk.wins.find((w) => w.type === "chat") || desk.wins[0]); fn(() => (busy = false)); };
     const gap = () => (reduced() ? 60 : 150);
     const demos = {
       autocorrect: (done) => { if (phone.kb.lang !== "en") phone.kb.setLang("en"); phone.kb.play("im on teh couch, adn teh keybaord works\n", gap(), done); },
@@ -773,9 +951,9 @@
       },
       ukrainian: (done) => { phone.kb.setLang("uk"); phone.kb.play("привіт, дякую!\n", gap(), () => setTimeout(() => { done(); }, 200)); },
       super: (done) => {
-        phone.strip.go(3);
+        // Super in your own row, or on the last page.
+        const b = phone.strip.key("KEY_LEFTMETA");
         setTimeout(() => {
-          const b = $('.ks button[data-code="KEY_LEFTMETA"]', root);
           b.classList.add("down");
           phone.mods.down("KEY_LEFTMETA");
           setTimeout(() => {

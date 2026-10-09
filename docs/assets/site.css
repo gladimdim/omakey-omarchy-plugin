@@ -758,20 +758,53 @@ footer a { color: var(--muted); }
 .tp-panel.compact .tp-strip input { width: 34%; }
 .tp-panel.compact .tp-chip { font-size: 2.8cqw; }
 
-/* The key strip: four pages, swiped sideways. */
+/* The key strip: your own row on top, four pages swiped sideways below. */
 .pp-strip { flex: none; }
-.ks { padding: 1cqw 0 .6cqw; background: var(--p-bg); }
+.ks { position: relative; padding: 1.6cqw 0 .6cqw; background: var(--p-bg); }
+.ks-row { position: relative; display: flex; align-items: center; padding: 0 0 0 2cqw; margin-bottom: 1.2cqw; touch-action: pan-y; }
+.ks-slots { flex: 1; min-width: 0; display: flex; gap: 1cqw; }
+.ks-slot { flex: 1; min-width: 0; height: 9.5cqw; display: flex; border-radius: 2cqw; box-sizing: border-box; }
+.ks-slot:empty { border: 1.5px dashed color-mix(in srgb, var(--p-dim) 70%, transparent); }
+.ks-slot.landing { border-color: var(--p-accent); }
+.ks-hint { display: none; position: absolute; left: 2cqw; right: 9cqw; top: 50%; transform: translateY(-50%); text-align: center; pointer-events: none; }
+.ks-hint.on { display: block; }
+.ks-hint span { background: var(--p-bg); padding: .9cqw 2.4cqw; border-radius: 999px; font: 600 2.6cqw/1 var(--sans); color: var(--p-dim); white-space: nowrap; }
+.ks-edit { flex: none; width: 9cqw; height: 9.5cqw; display: grid; place-items: center; border: 0; padding: 0; background: transparent; color: var(--p-dim); cursor: pointer; }
+.ks-edit svg { width: 6.4cqw; height: 6.4cqw; border-radius: 50%; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.ks-edit:active svg { background: var(--p-key); }
+.ks-edit .tick, .ks.editing .ks-edit .pen { display: none; }
+.ks.editing .ks-edit .tick { display: block; background: var(--p-accent); color: var(--p-bg); }
+.ks.editing .ks-edit:active .tick { background: var(--p-accentkey); }
 .ks-view { overflow: hidden; touch-action: pan-y; cursor: grab; }
 .ks-track { display: flex; width: 400%; transition: transform .28s cubic-bezier(.2, .8, .2, 1); will-change: transform; }
 .ks-page { width: 25%; display: flex; gap: 1cqw; padding: 0 2cqw; box-sizing: border-box; }
-.ks-page button {
-  flex: 1; min-width: 0; height: 10.5cqw; border: 0; border-radius: 2cqw; background: var(--p-key); color: var(--p-fg);
+.ks-page button, .ks-slot button {
+  flex: 1; min-width: 0; height: 9.5cqw; border: 0; border-radius: 2cqw; background: var(--p-key); color: var(--p-fg);
   font: 700 3.6cqw/1 var(--mono); padding: 0; cursor: pointer; white-space: nowrap; overflow: hidden; touch-action: pan-y;
 }
-.ks-page:nth-child(2) button, .ks-page:nth-child(3) button, .ks-page:nth-child(4) button { font-size: 2.7cqw; }
-.ks-page button.mod { background: var(--p-mod); }
-.ks-page button.latched { background: var(--p-accentkey); color: var(--p-on-accent); }
-.ks-page button.down { background: var(--p-accent); color: var(--p-bg); }
+.ks-page:nth-child(2) button, .ks-page:nth-child(3) button, .ks-page:nth-child(4) button, .ks-slot button.l2 { font-size: 2.7cqw; }
+.ks-slot button.l4 { font-size: 2.3cqw; }
+.ks-slot button.l5 { font-size: 2cqw; }
+.ks-page button.mod, .ks-slot button.mod { background: var(--p-mod); }
+.ks-page button.latched, .ks-slot button.latched { background: var(--p-accentkey); color: var(--p-on-accent); }
+.ks-page button.down, .ks-slot button.down { background: var(--p-accent); color: var(--p-bg); }
+/* Editing: the keys tremble, each a little out of step with its neighbours; the row's keys wear a × to clear them. */
+@keyframes ks-tremble { 0%, 100% { transform: rotate(-2.2deg); } 50% { transform: rotate(2.2deg); } }
+.ks.editing .ks-page button, .ks.editing .ks-slot button { animation: ks-tremble .26s ease-in-out infinite; animation-delay: calc(var(--i, 0) * -71ms); touch-action: none; }
+.ks.editing .ks-view, .ks.editing .ks-row { touch-action: none; }
+.ks.editing .ks-slot button { position: relative; overflow: visible; }
+.ks.editing .ks-slot button::before {
+  content: "×"; position: absolute; left: -1cqw; top: -1cqw; width: 3.6cqw; height: 3.6cqw; border-radius: 50%;
+  background: var(--p-dim); color: var(--p-bg); font: 700 3cqw/3.5cqw var(--sans); text-align: center;
+}
+@media (prefers-reduced-motion: reduce) { .ks.editing .ks-page button, .ks.editing .ks-slot button { animation: none; } }
+/* A key picked up while editing, above the finger. */
+.ks-drag {
+  display: none; position: absolute; left: 0; top: 0; z-index: 5; place-items: center; border-radius: 2.2cqw; background: var(--p-accent); color: var(--p-bg);
+  font: 700 3cqw/1 var(--mono); white-space: nowrap; pointer-events: none; box-shadow: 0 1.5cqw 4cqw rgba(0, 0, 0, .45); transition: opacity .12s;
+}
+.ks-drag.on { display: grid; }
+.ks-drag.off { opacity: .5; }
 .ks-dots { position: relative; height: 4cqw; display: flex; justify-content: center; align-items: center; }
 .ks-dots i { width: 12px; display: grid; place-items: center; }
 .ks-dots i::before { content: ""; width: 4px; height: 4px; border-radius: 50%; background: var(--p-dim); }
