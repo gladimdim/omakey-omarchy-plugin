@@ -39,7 +39,7 @@ impl KeyboardLayout {
         match layout {
             Some(l) => {
                 let changed = self.wanted.as_deref() != Some(l);
-                let stale = self.last_check.map_or(true, |t| now.duration_since(t) >= RECHECK);
+                let stale = self.last_check.is_none_or(|t| now.duration_since(t) >= RECHECK);
                 if changed || (has_events && stale) {
                     self.wanted = Some(l.to_string());
                     self.last_check = Some(now);

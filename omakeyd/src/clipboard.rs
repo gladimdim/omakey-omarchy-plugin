@@ -227,11 +227,8 @@ impl WlClipboard {
 
 impl Backend for WlClipboard {
     fn read(&mut self) -> Contents {
-        let types = run(Self::command("wl-paste").arg("--list-types"), 64 * 1024);
-        let types = match types {
-            Ok(t) => String::from_utf8_lossy(&t).into_owned(),
-            Err(e) => return Err(e),
-        };
+        let types = run(Self::command("wl-paste").arg("--list-types"), 64 * 1024)?;
+        let types = String::from_utf8_lossy(&types);
         let sensitive = types.lines().any(|t| t.trim() == "x-kde-passwordManagerHint");
         let bytes = run(Self::command("wl-paste").args(["--no-newline", "--type", "text"]), MAX_CLIP)?;
         if bytes.is_empty() {
