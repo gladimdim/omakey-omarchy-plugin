@@ -24,13 +24,14 @@ pub fn generate() -> serde_json::Value {
         device_id,
         key,
         bt: None,
+        wake: None,
     };
 
     let mut client = Client::with_random(device_id, key, client_random);
     let hello = client.hello_with_nonce("Pixel 9", hello_nonce);
 
     let welcome_body =
-        Welcome { client_random, server_random, session_id, name: "omarchy desk".into(), features: FEATURE_POINTER, bt_address: None }
+        Welcome { client_random, server_random, session_id, name: "omarchy desk".into(), features: FEATURE_POINTER, bt_address: None, wake_mac: None }
             .encode();
     let welcome = seal(
         &cipher(&key),

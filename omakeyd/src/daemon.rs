@@ -11,6 +11,7 @@ use crate::seat;
 use crate::server::{BtStatus, Pending, Server, SessionInfo, Shared, PAIRING_TTL};
 use crate::store::{self, hex, unix_now, Config, Device, Devices};
 use crate::theme::ThemeWatch;
+use crate::wake;
 use crate::hypr::KeyboardLayout;
 use serde_json::json;
 use std::io::{BufRead, BufReader, ErrorKind, Write};
@@ -114,6 +115,7 @@ pub fn run(port_override: Option<u16>, dry_run: bool) -> Result<(), String> {
         }
     }
     let bluetooth = bluetooth::start(server.clone(), shared.clone());
+    wake::start(server.clone(), shared.clone());
     let ctx = Arc::new(Context {
         shared: shared.clone(),
         host_id,
@@ -361,6 +363,7 @@ struct Snapshot {
     pending: Option<(String, u64, [u8; 32])>,
     paired: (u64, String),
     bluetooth: BtStatus,
+    wake: wake::WakeStatus,
     uinput: &'static str,
 }
 
@@ -372,6 +375,7 @@ fn snapshot(ctx: &Context) -> Snapshot {
         pending: sh.pending.as_ref().map(|p| (p.uri.clone(), p.expires_unix, p.key)),
         paired: sh.paired.clone(),
         bluetooth: sh.bluetooth.clone(),
+        wake: sh.wake.clone(),
         uinput: sh.uinput,
     }
 }
@@ -415,6 +419,7 @@ fn state_json(ctx: &Context, running: bool) -> serde_json::Value {
             "address": bt.address.as_ref().map(bluetooth::address_text),
             "reason": bt.reason,
         },
+        "wake_on_lan": wake::status_json(&snap.wake),
         "connected": snap.sessions.len(),
         "devices": devices,
         "paired": { "count": snap.paired.0, "name": snap.paired.1 },
@@ -458,6 +463,7 @@ fn open_pairing(ctx: &Context) -> serde_json::Value {
         device_id,
         key,
         bt: bt.address.filter(|_| bt.state == "on"),
+        wake: shared.wake.wake_mac(),
     };
     let uri = info.to_uri();
     let pending = Pending {
@@ -485,6 +491,10 @@ fn handle_request(ctx: &Context, line: &str) -> serde_json::Value {
             v
         }
         "pair" => open_pairing(ctx),
+        "wake-recheck" => {
+            wake::recheck();
+            json!({ "ok": true })
+        }
         "cancel-pair" => {
             let mut shared = ctx.shared.lock().unwrap();
             shared.pending = None;

@@ -18,6 +18,8 @@ pub struct PairInfo {
     pub key: Key,
     /// Bluetooth adapter address, for the Bluetooth fallback.
     pub bt: Option<[u8; 6]>,
+    /// The network card's MAC address, while it wakes on a Wake-on-LAN packet.
+    pub wake: Option<[u8; 6]>,
 }
 
 pub fn percent_encode(s: &str) -> String {
@@ -69,12 +71,16 @@ impl PairInfo {
         if let Some(b) = self.bt {
             uri.push_str(&format!("&b={}", hex(&b)));
         }
+        if let Some(w) = self.wake {
+            uri.push_str(&format!("&w={}", hex(&w)));
+        }
         uri
     }
 
     pub fn parse(uri: &str) -> Option<PairInfo> {
         let query = uri.strip_prefix("omakey://pair?")?;
-        let (mut h, mut n, mut a, mut p, mut d, mut k, mut v, mut b) = (None, None, None, None, None, None, None, None);
+        let (mut h, mut n, mut a, mut p, mut d, mut k, mut v, mut b, mut w) =
+            (None, None, None, None, None, None, None, None, None);
         for part in query.split('&') {
             let (key, val) = part.split_once('=')?;
             let val = percent_decode(val)?;
@@ -87,13 +93,14 @@ impl PairInfo {
                 "d" => d = unhex::<8>(&val),
                 "k" => k = unb64_key(&val),
                 "b" => b = unhex::<6>(&val),
+                "w" => w = unhex::<6>(&val),
                 _ => {}
             }
         }
         if v.as_deref() != Some("1") {
             return None;
         }
-        Some(PairInfo { host_id: h?, host_name: n.unwrap_or_default(), addrs: a?, port: p?, device_id: d?, key: k?, bt: b })
+        Some(PairInfo { host_id: h?, host_name: n.unwrap_or_default(), addrs: a?, port: p?, device_id: d?, key: k?, bt: b, wake: w })
     }
 }
 
@@ -282,6 +289,7 @@ mod tests {
             device_id: [9; 8],
             key: [0xab; 32],
             bt: Some([0x14, 0x18, 0xc3, 0x68, 0x87, 0x1e]),
+            wake: Some([0xe8, 0x8d, 0xa6, 0xe0, 0x89, 0x93]),
         };
         let uri = p.to_uri();
         assert!(!uri.contains(' '));

@@ -13,6 +13,7 @@ mod server;
 mod store;
 mod theme;
 mod vectors;
+mod wake;
 
 #[cfg(test)]
 mod tests;
@@ -35,6 +36,7 @@ Usage:
   omakeyd rename <device-id> <name>    rename a phone
   omakeyd config [--name NAME] [--port N]
                                        show or change settings (restart to apply)
+  omakeyd wake-on-lan [on|off]         let phones wake this computer (asks for sudo)
   omakeyd test-client <pair-uri> [--addr IP] [--text TEXT]
                                        pair as a fake phone and type TEXT
                                        (types into the focused window!)
@@ -78,6 +80,7 @@ fn main() -> ExitCode {
             None => Err("usage: omakeyd test-client <pair-uri> [--addr IP] [--text TEXT]".into()),
         },
         "config" => config(opt("--name"), opt("--port")),
+        "wake-on-lan" => wake::command(args.get(1).map(String::as_str)),
         "test-vectors" => {
             println!("{}", serde_json::to_string_pretty(&vectors::generate()).unwrap());
             Ok(())
@@ -163,6 +166,12 @@ fn status(as_json: bool) -> Result<(), String> {
         Some("on") => println!("Bluetooth: on ({})", bt["address"].as_str().unwrap_or("")),
         Some(state) => println!("Bluetooth: {state} ({})", bt["reason"].as_str().unwrap_or("")),
         None => {}
+    }
+    let w = &s["wake_on_lan"];
+    match (w["on"].as_bool(), w["interface"].as_str()) {
+        (Some(true), Some(i)) => println!("Wake-on-LAN: on ({i}, {})", w["mac"].as_str().unwrap_or("")),
+        (Some(false), _) => println!("Wake-on-LAN: off ({})", w["reason"].as_str().unwrap_or("")),
+        _ => {}
     }
     let n = s["connected"].as_u64().unwrap_or(0);
     println!("Connected phones: {n}");

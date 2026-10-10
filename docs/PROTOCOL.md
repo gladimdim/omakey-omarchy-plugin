@@ -38,13 +38,15 @@ All integers are **big-endian**. Lengths are in bytes.
 Pairing is a QR code shown by `omakeyd pair` or the bar widget:
 
 ```
-omakey://pair?v=1&h=<host id hex>&n=<host name>&a=<ip>[,<ip>...]&p=<port>&d=<device id hex>&k=<K, base64url, no padding>[&b=<bt address hex>]
+omakey://pair?v=1&h=<host id hex>&n=<host name>&a=<ip>[,<ip>...]&p=<port>&d=<device id hex>&k=<K, base64url, no padding>[&b=<bt address hex>][&w=<mac hex>]
 ```
 
 `n` is percent-encoded UTF-8. `a` lists the server's IPv4 addresses, LAN
 addresses first. `b`, when the server has Bluetooth, is its adapter
 address as 12 hex digits (`1418c368871e` for `14:18:C3:68:87:1E`); see
-[Bluetooth](#bluetooth). The server writes the device to
+[Bluetooth](#bluetooth). `w`, while the server's network card wakes it on
+a magic packet, is that card's MAC address, also as 12 hex digits; see
+[Wake-on-LAN](#wake-on-lan). The server writes the device to
 `~/.config/omakey/devices.json` the first time a HELLO with that device id
 decrypts, and closes the pairing window; each QR code pairs one phone. If no
 phone uses it, it expires after 5 minutes.
@@ -123,13 +125,17 @@ session_id       4
 name_len         1
 name             name_len   UTF-8 host name
 features         1          optional; bit 0 = touchpad (pointer) support,
-                            bit 1 = clipboard (CLIP)
+                            bit 1 = clipboard (CLIP), bit 2 = Wake-on-LAN
 bt_address       6          optional; the server's Bluetooth adapter
+wake_mac         6          only with bit 2; the MAC address to wake
 ```
 
 Servers before the touchpad send no `features` byte; read it as 0. A server
 without Bluetooth sends no `bt_address`; phones paired before it existed
-learn it here. Clients ignore any bytes after the fields they know.
+learn it here. With the Wake-on-LAN bit, `bt_address` is always there, as
+six zeros when the server has no Bluetooth, and `wake_mac` follows it.
+Clients read an all-zero `bt_address` as none. Clients ignore any bytes
+after the fields they know.
 
 Both sides then derive two 32-byte keys with HKDF-SHA256:
 
@@ -382,6 +388,39 @@ Separately, the phone can be a standard Bluetooth HID keyboard and mouse
 for any computer, without omakeyd. That uses the HID Device profile and
 the computer's own Bluetooth pairing, and none of this protocol. Its
 report descriptor is in the Android app (`protocol/.../Hid.kt`).
+
+## Wake-on-LAN
+
+A phone can wake a sleeping computer that it shares a network with. The
+server sets the WELCOME Wake-on-LAN bit, with its `wake_mac`, and puts `w` in
+pairing links, only while its network card will wake it on a magic packet.
+A phone keeps the last `wake_mac` it was told, and forgets it after a
+WELCOME without the bit.
+
+- **Which card.** The physical interface with a private IPv4 address,
+  wired before Wi-Fi.
+- **The magic packet** is not part of this protocol and not encrypted: six
+  `0xFF` bytes, then the MAC address 16 times (102 bytes), in a UDP datagram
+  to port 9. The phone sends it to `255.255.255.255` and to its own subnet's
+  broadcast address on Wi-Fi. Routers don't pass broadcasts on, so it only
+  works from the same network.
+- **When.** The phone sends one when the computer hasn't answered a HELLO
+  within about 2 s, then every 5 s while it still doesn't, at most 6
+  times. A computer that is awake ignores it. Once the computer wakes, the
+  phone's HELLOs and mDNS reconnect as usual.
+- **Turning it on** needs root, so the server only checks whether it's
+  on: every 10 s, and at once after `omakeyd wake-on-lan on|off`. That
+  command uses sudo to switch the card now, and writes
+  `/etc/udev/rules.d/71-omakey-wake-on-lan.rules` so the setting comes back
+  at boot:
+  - Wi-Fi: `iw phy <phy> wowlan enable magic-packet` (WoWLAN). Wi-Fi only
+    wakes from sleep, never from power-off.
+  - Ethernet: `ethtool -s <iface> wol g`. This also wakes from power-off
+    where the firmware allows it.
+  - Both: the card's `device/power/wakeup` is set to `enabled`.
+
+  The server reads the state without root: `iw phy <phy> wowlan show`
+  for Wi-Fi, the `ETHTOOL_GWOL` ioctl for Ethernet.
 
 ## Test vectors
 

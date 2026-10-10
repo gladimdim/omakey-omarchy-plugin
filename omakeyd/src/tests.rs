@@ -577,6 +577,24 @@ fn welcome_advertises_the_clipboard_only_when_there_is_one() {
 }
 
 #[test]
+fn welcome_carries_the_wake_mac_only_while_wake_on_lan_is_on() {
+    let mut r = Rig::new();
+    let hello = r.client.hello("Pixel");
+    let reply = r.server.handle(&hello, r.addr, r.t0).unwrap();
+    let w = Welcome::decode(&open(&cipher(&r.key), &reply).unwrap()).unwrap();
+    assert_eq!((w.features & FEATURE_WAKE, w.wake_mac), (0, None));
+
+    let mac = [0xe8, 0x8d, 0xa6, 0xe0, 0x89, 0x93];
+    let mut r = Rig::new();
+    r.server.wake_mac = Some(mac);
+    let hello = r.client.hello("Pixel");
+    let reply = r.server.handle(&hello, r.addr, r.t0).unwrap();
+    let w = Welcome::decode(&open(&cipher(&r.key), &reply).unwrap()).unwrap();
+    assert_eq!(w.features & FEATURE_WAKE, FEATURE_WAKE);
+    assert_eq!((w.bt_address, w.wake_mac), (None, Some(mac)));
+}
+
+#[test]
 fn put_sets_the_clipboard_then_pastes() {
     let (mut r, fake) = Rig::with_clipboard();
     let text = "Привіт, desktop! ".repeat(150).into_bytes(); // several chunks

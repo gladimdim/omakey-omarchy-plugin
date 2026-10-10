@@ -6,6 +6,7 @@ use crate::hypr::KeyboardLayout;
 use crate::keyboard::{allowed, is_modifier, KeySink, Keyboard};
 use crate::protocol::*;
 use crate::store::{hex, unix_now, Device, Devices};
+use crate::wake::WakeStatus;
 use aes_gcm::Aes256Gcm;
 use std::collections::{BTreeSet, HashMap};
 use std::fmt;
@@ -77,6 +78,7 @@ pub struct Shared {
     pub paired: (u64, String),
     pub sessions: Vec<SessionInfo>,
     pub bluetooth: BtStatus,
+    pub wake: WakeStatus,
     /// The virtual keyboard: "ok", "away" (another user's session is in
     /// front at the seat), "unavailable" (can't open /dev/uinput) or "dry-run".
     pub uinput: &'static str,
@@ -97,6 +99,7 @@ impl Shared {
             paired: (0, String::new()),
             sessions: Vec::new(),
             bluetooth: BtStatus::default(),
+            wake: WakeStatus::default(),
             uinput: "",
             dirty: true,
             devices_dirty: false,
@@ -279,6 +282,9 @@ pub struct Server {
     /// Sent in WELCOME so phones learn where to reach us over Bluetooth.
     /// Some only while the profile is registered and the adapter is on.
     pub bt_address: Option<[u8; 6]>,
+    /// Sent in WELCOME so phones can wake us; Some only while the network
+    /// card wakes on a magic packet.
+    pub wake_mac: Option<[u8; 6]>,
     /// Set when sessions came or went, so the state file gets rewritten.
     pub changed: bool,
     /// Devices whose session just ended, for their last_seen.
@@ -301,6 +307,7 @@ impl Server {
             sessions: HashMap::new(),
             host_name,
             bt_address: None,
+            wake_mac: None,
             changed: true,
             seen: Vec::new(),
             hello_limit: RateLimiter::default(),
@@ -405,8 +412,11 @@ impl Server {
             server_random,
             session_id,
             name: self.host_name.clone(),
-            features: FEATURE_POINTER | if self.clipboard.is_some() { FEATURE_CLIPBOARD } else { 0 },
+            features: FEATURE_POINTER
+                | if self.clipboard.is_some() { FEATURE_CLIPBOARD } else { 0 }
+                | if self.wake_mac.is_some() { FEATURE_WAKE } else { 0 },
             bt_address: self.bt_address,
+            wake_mac: self.wake_mac,
         }
         .encode();
         let h = Header { kind: T_WELCOME, device_id: id, nonce: random_bytes() };

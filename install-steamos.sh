@@ -42,6 +42,9 @@ if [[ ${1:-} == --uninstall ]]; then
   systemctl --user daemon-reload
   echo "omakeyd removed. Paired phones are kept in ~/.config/omakey; delete it to forget them."
   echo "If you added \"Omakey: pair a phone\" to Steam, remove it from the library."
+  if [[ -e /etc/udev/rules.d/71-omakey-wake-on-lan.rules ]]; then
+    echo "Wake-on-LAN stays on at boot; to stop that: sudo rm /etc/udev/rules.d/71-omakey-wake-on-lan.rules"
+  fi
   exit 0
 fi
 

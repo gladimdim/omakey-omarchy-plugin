@@ -12,6 +12,9 @@
 #   ~/.config/systemd/user/omakeyd.service      runs it in your session
 #   ufw rules for UDP 47800 and mDNS            only if ufw is active, and
 #                                               only from private networks
+#
+# `omakeyd wake-on-lan on` may add /etc/udev/rules.d/71-omakey-wake-on-lan.rules
+# later; --uninstall removes it too.
 
 set -euo pipefail
 
@@ -19,6 +22,7 @@ PREFIX="${PREFIX:-/usr/local}"
 BIN="$PREFIX/bin/omakeyd"
 RULE="/etc/udev/rules.d/70-omakey-uinput.rules"
 MODULES="/etc/modules-load.d/omakey.conf"
+WAKE_RULE="/etc/udev/rules.d/71-omakey-wake-on-lan.rules"
 UNIT="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/omakeyd.service"
 PORT=47800
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -73,7 +77,7 @@ if [[ ${1:-} == --uninstall ]]; then
   systemctl --user disable --now omakeyd 2>/dev/null || true
   rm -f "$UNIT"
   systemctl --user daemon-reload
-  sudo rm -f "$BIN" "$RULE" "$MODULES"
+  sudo rm -f "$BIN" "$RULE" "$MODULES" "$WAKE_RULE"
   sudo udevadm control --reload
   if ufw_active; then
     ufw_rules delete

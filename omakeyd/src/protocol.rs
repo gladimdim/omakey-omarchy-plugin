@@ -27,6 +27,8 @@ pub const REJECT_UNKNOWN_DEVICE: u8 = 1;
 /// WELCOME feature bits.
 pub const FEATURE_POINTER: u8 = 1;
 pub const FEATURE_CLIPBOARD: u8 = 2;
+/// The server wakes on a Wake-on-LAN magic packet; `wake_mac` follows.
+pub const FEATURE_WAKE: u8 = 4;
 
 pub type DeviceId = [u8; 8];
 pub type Key = [u8; 32];
@@ -158,6 +160,9 @@ impl<'a> Reader<'a> {
     fn u32(&mut self) -> Option<u32> {
         self.take(4).map(|s| u32::from_be_bytes(s.try_into().unwrap()))
     }
+    fn arr6(&mut self) -> Option<[u8; 6]> {
+        self.take(6).map(|s| s.try_into().unwrap())
+    }
     fn arr16(&mut self) -> Option<[u8; 16]> {
         self.take(16).map(|s| s.try_into().unwrap())
     }
@@ -209,6 +214,10 @@ pub struct Welcome {
     /// The server's Bluetooth adapter, so a phone paired over Wi-Fi can
     /// fall back to Bluetooth. Absent when the server has no Bluetooth.
     pub bt_address: Option<[u8; 6]>,
+    /// The network card to send a Wake-on-LAN packet to, while it wakes on
+    /// one. Comes with FEATURE_WAKE, after a `bt_address` that is then
+    /// always there (zeros without Bluetooth).
+    pub wake_mac: Option<[u8; 6]>,
 }
 
 impl Welcome {
@@ -218,22 +227,24 @@ impl Welcome {
         out.extend_from_slice(&self.server_random);
         out.extend_from_slice(&self.session_id.to_be_bytes());
         push_name(&mut out, &self.name);
+        debug_assert_eq!(self.wake_mac.is_some(), self.features & FEATURE_WAKE != 0);
         out.push(self.features);
-        if let Some(a) = self.bt_address {
+        if let Some(mac) = self.wake_mac {
+            out.extend_from_slice(&self.bt_address.unwrap_or_default());
+            out.extend_from_slice(&mac);
+        } else if let Some(a) = self.bt_address {
             out.extend_from_slice(&a);
         }
         out
     }
     pub fn decode(buf: &[u8]) -> Option<Welcome> {
         let mut r = Reader::new(buf);
-        Some(Welcome {
-            client_random: r.arr16()?,
-            server_random: r.arr16()?,
-            session_id: r.u32()?,
-            name: r.name()?,
-            features: r.u8().unwrap_or(0),
-            bt_address: r.take(6).map(|s| s.try_into().unwrap()),
-        })
+        let (client_random, server_random, session_id, name) = (r.arr16()?, r.arr16()?, r.u32()?, r.name()?);
+        let features = r.u8().unwrap_or(0);
+        // Zeros hold the place of a Bluetooth address before `wake_mac`.
+        let bt_address = r.arr6().filter(|a| a != &[0; 6]);
+        let wake_mac = if features & FEATURE_WAKE != 0 { r.arr6() } else { None };
+        Some(Welcome { client_random, server_random, session_id, name, features, bt_address, wake_mac })
     }
 }
 
@@ -523,7 +534,7 @@ mod tests {
 
     #[test]
     fn welcome_features_default_to_zero_for_old_servers() {
-        let w = Welcome { client_random: [1; 16], server_random: [2; 16], session_id: 9, name: "d".into(), features: 1, bt_address: None };
+        let w = Welcome { client_random: [1; 16], server_random: [2; 16], session_id: 9, name: "d".into(), features: 1, bt_address: None, wake_mac: None };
         let enc = w.encode();
         assert_eq!(Welcome::decode(&enc).unwrap(), w);
         assert_eq!(Welcome::decode(&enc[..enc.len() - 1]).unwrap().features, 0);
@@ -531,13 +542,44 @@ mod tests {
 
     #[test]
     fn welcome_carries_the_bluetooth_address_after_features() {
-        let mut w = Welcome { client_random: [1; 16], server_random: [2; 16], session_id: 9, name: "d".into(), features: 1, bt_address: None };
+        let mut w = Welcome { client_random: [1; 16], server_random: [2; 16], session_id: 9, name: "d".into(), features: 1, bt_address: None, wake_mac: None };
         let without = w.encode();
         w.bt_address = Some([0x14, 0x18, 0xc3, 0x68, 0x87, 0x1e]);
         let with = w.encode();
         assert_eq!(with.len(), without.len() + 6);
         assert_eq!(Welcome::decode(&with).unwrap(), w);
         assert_eq!(Welcome::decode(&without).unwrap().bt_address, None);
+    }
+
+    #[test]
+    fn welcome_wake_mac_follows_a_bluetooth_slot() {
+        let mac = [0xe8, 0x8d, 0xa6, 0xe0, 0x89, 0x93];
+        let mut w = Welcome {
+            client_random: [1; 16],
+            server_random: [2; 16],
+            session_id: 9,
+            name: "d".into(),
+            features: 1,
+            bt_address: None,
+            wake_mac: None,
+        };
+        let plain = w.encode();
+        w.features |= FEATURE_WAKE;
+        w.wake_mac = Some(mac);
+        // No Bluetooth: six zeros keep its place, and read back as none.
+        let no_bt = w.encode();
+        assert_eq!(no_bt.len(), plain.len() + 12);
+        assert_eq!(&no_bt[no_bt.len() - 12..no_bt.len() - 6], &[0; 6]);
+        assert_eq!(Welcome::decode(&no_bt).unwrap(), w);
+        w.bt_address = Some([0x14, 0x18, 0xc3, 0x68, 0x87, 0x1e]);
+        let both = w.encode();
+        assert_eq!(both.len(), no_bt.len());
+        assert_eq!(Welcome::decode(&both).unwrap(), w);
+        // Without the feature bit, six more bytes are not a MAC.
+        let mut no_bit = both.clone();
+        let at = plain.len() - 1;
+        no_bit[at] &= !FEATURE_WAKE;
+        assert_eq!(Welcome::decode(&no_bit).unwrap().wake_mac, None);
     }
 
     #[test]
