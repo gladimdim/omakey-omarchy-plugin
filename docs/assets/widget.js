@@ -47,7 +47,7 @@
     if (!S.pairing) return false;
     S.pairing = null;
     const id = "phone" + Math.random().toString(36).slice(2, 6);
-    S.devices.unshift({ id, name, online: true, transport: "wifi", addr: "192.168.1." + (50 + Math.floor(Math.random() * 40)), loss: 0, held: 0, ping: 4, lastSeen: 0 });
+    S.devices.unshift({ id, name, online: true, addr: "192.168.1." + (50 + Math.floor(Math.random() * 40)), loss: 0, held: 0, ping: 4, lastSeen: 0 });
     S.justPaired = name;
     OMK.emit({ type: "paired", id });
     return true;

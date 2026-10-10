@@ -143,8 +143,8 @@
     pairing: null, // { expires, fp }
     justPaired: null,
     devices: [
-      { id: "pixel", name: "Pixel 9 Pro", online: true, transport: "wifi", addr: "192.168.1.42", loss: 0, held: 0, ping: 3, lastSeen: 0 },
-      { id: "tab", name: "Galaxy Tab S9", online: false, transport: "wifi", addr: "", loss: 0, held: 0, ping: 0, lastSeen: Date.now() / 1000 - 3 * 3600 },
+      { id: "pixel", name: "Pixel 9 Pro", online: true, addr: "192.168.1.42", loss: 0, held: 0, ping: 3, lastSeen: 0 },
+      { id: "tab", name: "Galaxy Tab S9", online: false, addr: "", loss: 0, held: 0, ping: 0, lastSeen: Date.now() / 1000 - 3 * 3600 },
     ],
   };
   OMK.on = (fn) => listeners.add(fn);

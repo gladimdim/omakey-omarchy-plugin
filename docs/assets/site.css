@@ -525,7 +525,7 @@ footer a { color: var(--muted); }
 .swatches button[aria-pressed="true"] { border-color: var(--teal); box-shadow: 0 0 0 1px var(--teal); }
 
 /* ═════════════════════════════════════════════════════════════
-   Small demos: touch-down timeline, wire simulator, Bluetooth, CLI.
+   Small demos: touch-down timeline, wire simulator, CLI.
    ═════════════════════════════════════════════════════════════ */
 .tl { display: grid; gap: 14px; }
 .tl-row { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 14px; align-items: center; font-size: 14px; }
@@ -571,7 +571,6 @@ footer a { color: var(--muted); }
 .budget i { height: 8px; border-radius: 4px; background: var(--grad); display: block; }
 .budget code { color: var(--text); font-size: 12px; text-align: right; }
 @media (max-width: 600px) { .budget div { grid-template-columns: 120px minmax(0, 1fr) 60px; } }
-
 
 /* Layout gallery */
 .gal-tabs { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; margin-bottom: 18px; }
