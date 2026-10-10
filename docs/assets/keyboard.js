@@ -8,7 +8,6 @@
   const OMK = (window.OMK = window.OMK || {});
   const DATA = window.OMK_DATA;
   const NS = "http://www.w3.org/2000/svg";
-  const BT_SIGN = '<svg class="bt-sign" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Bluetooth"><path d="M6.5 7 17.5 17 12 22V2l5.5 5-11 10"/></svg>';
   const U = 100; // SVG units per key unit
 
   OMK.layouts = DATA.layouts;
@@ -408,8 +407,6 @@
       this.pill.className = "kb-pill" + (kind === "ok" ? "" : kind === "warn" ? " warn" : " err");
       const pt = this.pill.querySelector(".pt");
       pt.textContent = text;
-      // A Bluetooth connection: the Bluetooth sign before the text, as in the app.
-      if (this.o.bluetooth) pt.insertAdjacentHTML("afterbegin", BT_SIGN);
     }
   }
   OMK.Phone = Phone;

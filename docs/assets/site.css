@@ -248,7 +248,6 @@ footer a { color: var(--muted); }
 .kb-pill i { font-style: normal; color: var(--p-ok); margin-right: .4em; }
 .kb-pill.warn i { color: var(--p-warn); }
 .kb-pill.err i { color: var(--p-err); }
-.kb-pill .bt-sign { display: inline-block; width: 1.15em; height: 1.15em; vertical-align: -.25em; margin-right: .3em; }
 .kb-handle {
   position: absolute; left: 50%; top: 52%; transform: translate(-50%, -50%); font: 700 clamp(8px, 1.1vw, 12px)/1 var(--sans); color: var(--p-accent);
   background: var(--p-surface); border: 1px solid var(--p-accent); border-radius: 999px; padding: .45em 1.3em; cursor: pointer; white-space: nowrap;
@@ -526,7 +525,7 @@ footer a { color: var(--muted); }
 .swatches button[aria-pressed="true"] { border-color: var(--teal); box-shadow: 0 0 0 1px var(--teal); }
 
 /* ═════════════════════════════════════════════════════════════
-   Small demos: touch-down timeline, wire simulator, Bluetooth, CLI.
+   Small demos: touch-down timeline, wire simulator, CLI.
    ═════════════════════════════════════════════════════════════ */
 .tl { display: grid; gap: 14px; }
 .tl-row { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 14px; align-items: center; font-size: 14px; }
@@ -572,34 +571,6 @@ footer a { color: var(--muted); }
 .budget i { height: 8px; border-radius: 4px; background: var(--grad); display: block; }
 .budget code { color: var(--text); font-size: 12px; text-align: right; }
 @media (max-width: 600px) { .budget div { grid-template-columns: 120px minmax(0, 1fr) 60px; } }
-
-.bt-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; text-align: left; }
-@media (max-width: 860px) { .bt-grid { grid-template-columns: minmax(0, 1fr); } }
-.bt-card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; }
-.bt-card h3 { margin: 0 0 6px; font-size: 20px; letter-spacing: -.01em; }
-.bt-card > p { color: var(--muted); margin: 0 0 16px; font-size: 15.5px; }
-.bt-sim { position: relative; height: 150px; border-radius: 12px; background: var(--bg2); border: 1px solid var(--border); overflow: hidden; }
-.bt-sim .end { position: absolute; top: 50%; transform: translateY(-50%); width: 92px; text-align: center; font-size: 12px; color: var(--muted); }
-.bt-sim .end svg { width: 40px; height: 40px; margin: 0 auto 6px; color: var(--text); }
-.bt-sim .end.l { left: 10px; }
-.bt-sim .end.r { right: 10px; }
-.bt-sim .path { position: absolute; left: 110px; right: 110px; height: 30px; display: flex; align-items: center; justify-content: center; font: 600 11.5px/1 var(--mono); border-radius: 15px; transition: all .35s; }
-.bt-sim .path.wifi { top: 28px; }
-.bt-sim .path.bt { bottom: 28px; }
-.bt-sim .path::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 2px; background: currentColor; opacity: .35; }
-.bt-sim .path span { position: relative; background: var(--bg2); padding: 3px 9px; border-radius: 999px; border: 1px solid currentColor; }
-.bt-sim .path.active { color: var(--teal); }
-.bt-sim .path.idle { color: #3d5463; }
-.bt-sim .path.down { color: var(--bad); }
-.bt-sim .flow { position: absolute; width: 8px; height: 8px; border-radius: 50%; background: var(--mint); box-shadow: 0 0 10px var(--mint); }
-.bt-state { margin-top: 12px; font: 12.5px/1.5 var(--mono); color: var(--muted); min-height: 38px; }
-.bt-state b { color: var(--text); }
-.devices { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-.devices button { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 14px 6px; border-radius: 12px; background: var(--bg2); border: 1px solid var(--border); color: var(--muted); font: 600 12.5px/1.2 var(--sans); cursor: pointer; }
-.devices button svg { width: 30px; height: 30px; color: var(--text); }
-.devices button[aria-pressed="true"] { border-color: var(--teal); color: var(--text); box-shadow: 0 0 0 1px var(--teal); }
-.bt-screen { margin-top: 12px; height: 74px; border-radius: 10px; background: #05090c; border: 1px solid var(--border); font: 14px/1.4 var(--mono); padding: 10px 12px; color: var(--text); overflow: hidden; white-space: pre-wrap; word-break: break-all; display: flex; flex-direction: column; justify-content: flex-end; }
-.bt-screen .m { color: var(--faint); }
 
 /* Layout gallery */
 .gal-tabs { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; margin-bottom: 18px; }
@@ -681,15 +652,7 @@ footer a { color: var(--muted); }
   .wire-pkt { left: 50%; top: 0; transform: translate(-50%, 0); max-width: 220px; }
   .wire-ctl input[type=range] { width: 96px; }
 
-  .bt-card, .facts > div { padding: 18px; }
-  .bt-sim .end { width: 60px; font-size: 11px; }
-  .bt-sim .end svg { width: 32px; height: 32px; }
-  .bt-sim .end.l { left: 4px; }
-  .bt-sim .end.r { right: 4px; }
-  .bt-sim .path { left: 66px; right: 66px; font-size: 10px; }
-  .bt-sim .path span { white-space: nowrap; padding: 3px 7px; }
-  .devices { gap: 6px; }
-  .devices button { padding: 10px 4px; }
+  .facts > div { padding: 18px; }
 
   /* Fact cards: icon beside the heading. */
   .facts > div { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 14px; align-items: center; }
