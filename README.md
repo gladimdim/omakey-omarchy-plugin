@@ -123,10 +123,13 @@ Click the ⌨ icon in the bar. The panel does everything:
   are being lost, how many keys they hold, and when the others were last
   seen. Rename (✎) or forget (⛓) each one.
 - **Service** — start it, stop it, restart it, or open its logs.
-- **Settings** — the name your phone shows and the UDP port.
-- **Android app** — *Get the Android app* shows a QR code for the latest
-  Omakey APK, with *Open in browser* and *Copy link*. During pairing it
-  takes the pairing code's place until you go *Back to pairing*.
+- **Settings** — the name your phone shows, the UDP port, and
+  [Wake on LAN](#wake-on-lan).
+- **Phone apps** — *Android app* shows a QR code for the latest Omakey
+  APK, *iPhone app* one for the [iPhone app](https://github.com/gladimdim/omakey-mobile-ios)'s
+  source and build steps (open source, built in Xcode, iOS 17+). Each has
+  *Open in browser* and *Copy link*. During pairing the app's code takes
+  the pairing code's place until you go *Back to pairing*.
 
 The QR code is good for one phone and 5 minutes. After pairing, the phone
 finds the desktop by itself (mDNS), even when its IP address changes.
@@ -143,6 +146,7 @@ omakeyd devices                 list paired phones
 omakeyd forget <device-id>      unpair a phone
 omakeyd rename <device-id> <n>  rename a phone
 omakeyd config [--name N] [--port P]  show or change settings
+omakeyd wake-on-lan [on|off]    let phones wake this computer (asks for sudo)
 omakeyd run [--dry-run]         the service itself (systemd runs this)
 ```
 
@@ -158,6 +162,27 @@ Logs: `journalctl --user -u omakeyd -f`.
 
 Or set them from the widget's Settings, or with `omakeyd config`.
 Restart with `systemctl --user restart omakeyd` after editing the file.
+
+### Wake on LAN
+
+The Omakey app can wake this computer from sleep. Turn it on under
+*Settings → Wake on LAN* in the widget, or run `omakeyd wake-on-lan on`.
+Either way it asks for your password, because the network card's setting
+needs root. It stays on after a reboot: a udev rule in
+`/etc/udev/rules.d/71-omakey-wake-on-lan.rules` sets it again.
+
+Phones learn the card's address the next time they connect. After that,
+opening a computer that doesn't answer sends it a Wake-on-LAN packet.
+
+- **Wi-Fi** (WoWLAN, with `iw`) wakes the computer from sleep, not from
+  power-off. It only works if the Wi-Fi card supports it;
+  `omakeyd wake-on-lan` tells you.
+- **Ethernet** (with `ethtool`) also wakes the computer from power-off,
+  if Wake-on-LAN is turned on in its firmware (BIOS/UEFI) settings.
+- The phone has to be on the same network: routers don't pass the
+  broadcast on.
+
+`omakeyd wake-on-lan off` turns it off and removes the rule.
 
 ## How it works
 

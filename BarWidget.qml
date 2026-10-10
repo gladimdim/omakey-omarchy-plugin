@@ -46,6 +46,16 @@ Panel {
   readonly property string bluetoothText: !bluetooth ? ""
     : bluetooth.state === "on" ? "Bluetooth on"
     : "Bluetooth off" + (bluetooth.reason ? " (" + bluetooth.reason + ")" : "")
+  // {interface, kind: "wifi" | "ethernet", mac, supported, on, reason}
+  readonly property var wake: state.wake_on_lan && typeof state.wake_on_lan === "object" ? state.wake_on_lan : null
+  readonly property string wakeText: !wake ? ""
+    : wake.on ? "Phones on this network can wake it from sleep" + (wake.kind === "ethernet" ? " or power-off" : "")
+                + " (" + wake.interface + ")"
+    : wake.supported ? "Off. Turning it on asks for your password."
+    : "Not available: " + wake.reason
+
+  // Connected: green whatever the theme (some themes' "green" is amber).
+  readonly property color connectedColor: "#4caf50"
 
   // ---- panel UI state ----
   property int pairedAtStart: -1
@@ -53,16 +63,24 @@ Panel {
   property bool busy: false
   property string renamingId: ""
   property string confirmForgetId: ""
+  // The settings page shows instead of the main one.
   property bool settingsOpen: false
+  // This plugin's version, from its manifest.
+  property string pluginVersion: ""
   property bool copied: false
-  property bool appOpen: false
+  // The phone app whose link shows: "", "android" or "ios".
+  property string appShown: ""
+  readonly property bool appOpen: appShown !== ""
+  readonly property var app: appShown === "ios" ? iosApp : androidApp
   property bool appCopied: false
 
-  // The Android app: its latest release, and that link as a QR code (made
-  // with qrencode, one string of 0/1 per row). Built in, so it shows even
-  // before the service is set up, when the phone needs it most.
-  readonly property string appUrl: "https://github.com/gladimdim/omakey-mobile/releases/latest"
-  readonly property var appQr: [
+  // The phone apps: where to get each, and that link as a QR code (made
+  // with qrencode, one string of 0/1 per row). Built in, so they show even
+  // before the service is set up, when the phone needs them most.
+  readonly property var androidApp: ({
+    url: "https://github.com/gladimdim/omakey-mobile/releases/latest",
+    about: "Scan with your phone's camera to download the latest Omakey APK, then open it to install.",
+    qr: [
       "111111100100000110011001001111111",
       "100000101101100001101110001000001",
       "101110100111001010111110101011101",
@@ -96,7 +114,44 @@ Panel {
       "101110101110011111101101001001100",
       "100000101110110010001110010101100",
       "111111101110101001110001111001010"
-  ]
+    ]
+  })
+  // Open source, built in Xcode: the link is its source and build steps.
+  readonly property var iosApp: ({
+    url: "https://github.com/gladimdim/omakey-mobile-ios",
+    about: "Scan with your iPhone's camera for the source and build steps: build it in Xcode (iOS 17 or newer).",
+    qr: [
+      "11111110100110100110001111111",
+      "10000010011001001001001000001",
+      "10111010001011110011001011101",
+      "10111010000011011100101011101",
+      "10111010010101100011001011101",
+      "10000010001011100110001000001",
+      "11111110101010101010101111111",
+      "00000000101101000001000000000",
+      "11011010011100100100001000001",
+      "01100100110010110111010110110",
+      "10010011101101111100000110100",
+      "11111100111110000101111101001",
+      "11001010110110011001101100001",
+      "01000100000000111010001111111",
+      "00101011111111010001111010101",
+      "10011101001100011011000110101",
+      "01111010001011000001110001000",
+      "11010000100111010011000010110",
+      "11011011101101010111000011001",
+      "11100001001111100001001001100",
+      "11011111101000111100111111110",
+      "00000000110100110110100011000",
+      "11111110011100011101101011000",
+      "10000010000000100101100010000",
+      "10111010111010101011111111000",
+      "10111010100100111110010000001",
+      "10111010010001110100110110111",
+      "10000010100010010000001101101",
+      "11111110100011000001101010000"
+    ]
+  })
 
   // A QR code: dark on light, which phones scan reliably whatever the theme.
   component QrCode: Rectangle {
@@ -154,6 +209,16 @@ Panel {
   }
 
   // ---- reading state ----
+  FileView {
+    path: root.pluginDir + "/manifest.json"
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: {
+      try { root.pluginVersion = JSON.parse(text()).version || "" } catch (e) {}
+    }
+  }
+
   FileView {
     id: stateFile
     path: root.statePath
@@ -290,6 +355,11 @@ Panel {
     root.close()
   }
   function showLogs() { inTerminal("journalctl --user -u omakeyd -n 100 -f") }
+  // Needs root: the CLI asks for the sudo password in a terminal.
+  function setWake(on) {
+    inTerminal(Util.shellQuote(root.bin) + " wake-on-lan " + (on ? "on" : "off"))
+    root.close()
+  }
   function startPairing() {
     root.pairedAtStart = root.pairedCount
     run(["pair", "--no-wait"])
@@ -310,11 +380,11 @@ Panel {
     copiedTimer.restart()
   }
   function openAppPage() {
-    Quickshell.execDetached(["xdg-open", root.appUrl])
+    Quickshell.execDetached(["xdg-open", root.app.url])
     root.close()
   }
   function copyAppLink() {
-    Quickshell.execDetached(["wl-copy", root.appUrl])
+    Quickshell.execDetached(["wl-copy", root.app.url])
     root.appCopied = true
     appCopiedTimer.restart()
   }
@@ -326,6 +396,11 @@ Panel {
     root.renamingId = ""
     var n = String(name).trim()
     if (n.length > 0) run(["rename", id, n])
+  }
+  function openSettings() {
+    hostField.text = root.state.host_name || ""
+    portField.text = String(root.state.port || 47800)
+    root.settingsOpen = true
   }
   function saveSettings(name, port) {
     root.busy = true
@@ -354,7 +429,7 @@ Panel {
       root.renamingId = ""
       root.confirmForgetId = ""
       root.settingsOpen = false
-      root.appOpen = false
+      root.appShown = ""
     }
   }
 
@@ -405,6 +480,8 @@ Panel {
         if (root.renamingId || root.confirmForgetId) {
           root.renamingId = ""
           root.confirmForgetId = ""
+        } else if (root.settingsOpen) {
+          root.settingsOpen = false
         } else {
           root.close()
         }
@@ -420,6 +497,7 @@ Panel {
 
         // ---- header ----
         Item {
+          visible: !root.settingsOpen
           width: parent.width
           height: Math.max(titleBlock.implicitHeight, headerActions.height)
 
@@ -454,7 +532,7 @@ Panel {
                 width: Style.space(7)
                 height: width
                 radius: width / 2
-                color: root.connected > 0 ? Color.accent
+                color: root.connected > 0 ? root.connectedColor
                   : root.phase === "running" ? Util.alpha(root.bar.foreground, 0.5)
                   : root.phase === "failed" ? Color.urgent
                   : Util.alpha(root.bar.foreground, 0.2)
@@ -497,6 +575,15 @@ Panel {
             }
 
             PanelActionButton {
+              visible: root.phase !== "missing"
+              // nf-md-cog
+              iconText: "󰒓"
+              tooltipText: "Settings"
+              foreground: root.bar.foreground
+              onClicked: root.openSettings()
+            }
+
+            PanelActionButton {
               visible: root.running
               // nf-md-power
               iconText: "󰐥"
@@ -507,402 +594,461 @@ Panel {
           }
         }
 
-        // ---- setup / start / update ----
-        Button {
-          visible: root.needsUpdate
-          width: parent.width
-          text: root.busy ? "Updating in the terminal…" : "Update the service"
-          tooltipText: "This widget needs omakeyd " + root.expectedVersion + "; it asks for your password in a terminal"
-          iconText: "󰚰"
-          foreground: Color.accent
-          fontFamily: root.bar.fontFamily
-          bordered: true
-          enabled: !root.busy
-          onClicked: root.install()
-        }
-
-        Button {
-          visible: root.phase === "missing"
-          width: parent.width
-          text: root.busy ? "Installing in the terminal…" : "Set up Omakey"
-          iconText: "󰏗"
-          foreground: root.bar.foreground
-          fontFamily: root.bar.fontFamily
-          bordered: true
-          enabled: !root.busy
-          onClicked: root.install()
-        }
-
-        Button {
-          visible: root.phase === "stopped" || root.phase === "failed"
-          width: parent.width
-          text: root.phase === "failed" ? "Try again" : "Start Omakey"
-          iconText: "󰐊"
-          foreground: root.bar.foreground
-          fontFamily: root.bar.fontFamily
-          bordered: true
-          onClicked: root.systemctl(root.phase === "failed" ? "restart" : "start")
-        }
-
-        // ---- pairing ----
-        // The app's QR code takes this one's place while it's open: get the
-        // app first, then pair.
+        // ---- main page ----
         Column {
-          visible: root.pairing !== null && !root.appOpen
+          visible: !root.settingsOpen
           width: parent.width
-          spacing: Style.space(10)
+          spacing: Style.space(14)
 
-          QrCode {
-            rows: root.pairing ? root.pairing.qr : []
-            width: Math.min(parent.width, Style.space(250))
-            height: width
-            anchors.horizontalCenter: parent.horizontalCenter
-          }
-
-          Text {
+          // ---- setup / start / update ----
+          Button {
+            visible: root.needsUpdate
             width: parent.width
-            horizontalAlignment: Text.AlignHCenter
-            text: "One phone · expires in " + Math.floor(root.secondsLeft / 60) + ":" + ("0" + (root.secondsLeft % 60)).slice(-2)
-            textFormat: Text.PlainText
-            color: Util.alpha(root.bar.foreground, 0.6)
-            font.family: root.bar.fontFamily
-            font.pixelSize: Style.font.caption
+            text: root.busy ? "Updating in the terminal…" : "Update the service"
+            tooltipText: "This widget needs omakeyd " + root.expectedVersion + "; it asks for your password in a terminal"
+            iconText: "󰚰"
+            foreground: Color.accent
+            fontFamily: root.bar.fontFamily
+            bordered: true
+            enabled: !root.busy
+            onClicked: root.install()
           }
 
-          Text {
-            visible: !!(root.pairing && root.pairing.fingerprint)
+          Button {
+            visible: root.phase === "missing"
             width: parent.width
-            horizontalAlignment: Text.AlignHCenter
-            text: "Fingerprint " + (root.pairing ? root.pairing.fingerprint : "") + " · the phone shows the same code"
-            textFormat: Text.PlainText
-            wrapMode: Text.WordWrap
-            color: Util.alpha(root.bar.foreground, 0.6)
-            font.family: root.bar.fontFamily
-            font.pixelSize: Style.font.caption
-          }
-
-          Row {
-            id: pairActions
-            width: parent.width
-            spacing: Style.space(6)
-            readonly property real cellWidth: (width - spacing) / 2
-
-            Button {
-              width: pairActions.cellWidth
-              text: root.copied ? "Copied" : "Copy link"
-              iconText: "󰆏"
-              tooltipText: "For pasting into the app when the camera can't scan"
-              foreground: root.bar.foreground
-              fontFamily: root.bar.fontFamily
-              bordered: true
-              onClicked: root.copyLink()
-            }
-
-            Button {
-              width: pairActions.cellWidth
-              text: "Cancel"
-              foreground: root.bar.foreground
-              fontFamily: root.bar.fontFamily
-              bordered: true
-              onClicked: root.cancelPairing()
-            }
-          }
-        }
-
-        Button {
-          visible: root.running && root.pairing === null
-          width: parent.width
-          text: devicesModel.count === 0 ? "Pair a phone" : "Pair another phone"
-          // nf-md-qrcode
-          iconText: "󰐲"
-          foreground: root.bar.foreground
-          fontFamily: root.bar.fontFamily
-          bordered: true
-          onClicked: root.startPairing()
-        }
-
-        // ---- the Android app ----
-        Button {
-          width: parent.width
-          text: root.appOpen ? (root.pairing ? "Back to pairing" : "Hide the Android app link") : "Get the Android app"
-          // nf-md-android
-          iconText: "󰀲"
-          tooltipText: "A QR code and link to the latest Omakey APK"
-          foreground: root.bar.foreground
-          fontFamily: root.bar.fontFamily
-          bordered: true
-          onClicked: root.appOpen = !root.appOpen
-        }
-
-        Column {
-          visible: root.appOpen
-          width: parent.width
-          spacing: Style.space(10)
-
-          QrCode {
-            rows: root.appQr
-            width: Math.min(parent.width, Style.space(220))
-            height: width
-            anchors.horizontalCenter: parent.horizontalCenter
-          }
-
-          Text {
-            width: parent.width
-            horizontalAlignment: Text.AlignHCenter
-            text: "Scan with your phone's camera to download the latest Omakey APK, then open it to install."
-            textFormat: Text.PlainText
-            wrapMode: Text.WordWrap
-            color: Util.alpha(root.bar.foreground, 0.6)
-            font.family: root.bar.fontFamily
-            font.pixelSize: Style.font.caption
-          }
-
-          Row {
-            id: appActions
-            width: parent.width
-            spacing: Style.space(6)
-            readonly property real cellWidth: (width - spacing) / 2
-
-            Button {
-              width: appActions.cellWidth
-              text: "Open in browser"
-              // nf-md-open_in_new
-              iconText: "󰏌"
-              foreground: root.bar.foreground
-              fontFamily: root.bar.fontFamily
-              bordered: true
-              onClicked: root.openAppPage()
-            }
-
-            Button {
-              width: appActions.cellWidth
-              text: root.appCopied ? "Copied" : "Copy link"
-              iconText: "󰆏"
-              foreground: root.bar.foreground
-              fontFamily: root.bar.fontFamily
-              bordered: true
-              onClicked: root.copyAppLink()
-            }
-          }
-        }
-
-        // ---- phones ----
-        PanelSeparator {
-          visible: devicesModel.count > 0
-          foreground: root.bar.foreground
-        }
-
-        Column {
-          visible: devicesModel.count > 0
-          width: parent.width
-          spacing: Style.space(10)
-
-          PanelSectionHeader {
-            text: "PHONES"
+            text: root.busy ? "Installing in the terminal…" : "Set up Omakey"
+            iconText: "󰏗"
             foreground: root.bar.foreground
             fontFamily: root.bar.fontFamily
+            bordered: true
+            enabled: !root.busy
+            onClicked: root.install()
           }
 
-          Repeater {
-            model: devicesModel
-
-            Item {
-              id: deviceRow
-              required property string deviceId
-              required property string name
-              required property bool online
-              required property string addr
-              required property string transport
-              required property real loss
-              required property int held
-              required property real lastSeen
-              readonly property bool live: online && root.running
-              readonly property bool renaming: root.renamingId === deviceId
-              readonly property bool confirming: root.confirmForgetId === deviceId
-
-              width: parent.width
-              height: Math.max(info.implicitHeight, actions.height)
-
-              Rectangle {
-                id: dot
-                width: Style.space(7)
-                height: width
-                radius: width / 2
-                anchors.left: parent.left
-                anchors.verticalCenter: parent.verticalCenter
-                color: deviceRow.live ? Color.accent : Util.alpha(root.bar.foreground, 0.25)
-              }
-
-              Column {
-                id: info
-                anchors.left: dot.right
-                anchors.leftMargin: Style.space(10)
-                anchors.right: actions.left
-                anchors.rightMargin: Style.space(8)
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: Style.space(2)
-
-                Text {
-                  visible: !deviceRow.renaming
-                  width: parent.width
-                  text: deviceRow.name
-                  textFormat: Text.PlainText
-                  elide: Text.ElideRight
-                  color: root.bar.foreground
-                  font.family: root.bar.fontFamily
-                  font.pixelSize: Style.font.body
-                }
-
-                TextField {
-                  id: nameField
-                  visible: deviceRow.renaming
-                  width: parent.width
-                  foreground: root.bar.foreground
-                  placeholderText: "Phone name"
-                  maximumLength: 64
-                  onVisibleChanged: if (visible) {
-                    text = deviceRow.name
-                    forceActiveFocus()
-                    selectAll()
-                  }
-                  onAccepted: root.rename(deviceRow.deviceId, text)
-                  Keys.onEscapePressed: root.renamingId = ""
-                }
-
-                Text {
-                  width: parent.width
-                  text: deviceRow.confirming ? "Forget this phone? It will need a new QR code."
-                    : deviceRow.renaming ? "Enter to save, Esc to cancel"
-                    : deviceRow.live ? "Connected · "
-                      + (deviceRow.transport === "bluetooth" ? "Bluetooth" : "Wi-Fi " + deviceRow.addr)
-                      + (deviceRow.loss >= 1 ? " · " + Math.round(deviceRow.loss) + "% lost" : "")
-                      + (deviceRow.held > 0 ? " · " + deviceRow.held + " held" : "")
-                    : "Last seen " + root.ago(deviceRow.lastSeen)
-                  textFormat: Text.PlainText
-                  elide: Text.ElideRight
-                  wrapMode: deviceRow.confirming ? Text.WordWrap : Text.NoWrap
-                  color: deviceRow.confirming ? Color.urgent : Util.alpha(root.bar.foreground, 0.6)
-                  font.family: root.bar.fontFamily
-                  font.pixelSize: Style.font.caption
-                }
-              }
-
-              Row {
-                id: actions
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: Style.space(2)
-
-                // Normal: rename, forget.
-                PanelActionButton {
-                  visible: !deviceRow.renaming && !deviceRow.confirming
-                  // nf-md-pencil
-                  iconText: "󰏫"
-                  tooltipText: "Rename"
-                  foreground: root.bar.foreground
-                  enabled: root.running
-                  onClicked: {
-                    root.confirmForgetId = ""
-                    root.renamingId = deviceRow.deviceId
-                  }
-                }
-
-                PanelActionButton {
-                  visible: !deviceRow.renaming && !deviceRow.confirming
-                  // nf-md-link_off
-                  iconText: "󰌸"
-                  tooltipText: "Forget this phone"
-                  foreground: root.bar.foreground
-                  enabled: root.running
-                  onClicked: {
-                    root.renamingId = ""
-                    root.confirmForgetId = deviceRow.deviceId
-                  }
-                }
-
-                // Renaming: save.
-                PanelActionButton {
-                  visible: deviceRow.renaming
-                  // nf-md-check
-                  iconText: "󰄬"
-                  tooltipText: "Save"
-                  foreground: root.bar.foreground
-                  onClicked: root.rename(deviceRow.deviceId, nameField.text)
-                }
-
-                // Confirming: forget / keep.
-                Button {
-                  visible: deviceRow.confirming
-                  text: "Forget"
-                  foreground: Color.urgent
-                  fontFamily: root.bar.fontFamily
-                  fontSize: Style.font.bodySmall
-                  bordered: true
-                  onClicked: root.forget(deviceRow.deviceId)
-                }
-
-                Button {
-                  visible: deviceRow.confirming
-                  text: "Keep"
-                  foreground: root.bar.foreground
-                  fontFamily: root.bar.fontFamily
-                  fontSize: Style.font.bodySmall
-                  onClicked: root.confirmForgetId = ""
-                }
-              }
-            }
-          }
-        }
-
-        // ---- settings ----
-        PanelSeparator {
-          visible: root.installed && root.probed && root.phase !== "missing"
-          foreground: root.bar.foreground
-        }
-
-        Column {
-          visible: root.installed && root.probed && root.phase !== "missing"
-          width: parent.width
-          spacing: Style.space(10)
-
-          Item {
+          Button {
+            visible: root.phase === "stopped" || root.phase === "failed"
             width: parent.width
-            height: settingsHeader.implicitHeight
+            text: root.phase === "failed" ? "Try again" : "Start Omakey"
+            iconText: "󰐊"
+            foreground: root.bar.foreground
+            fontFamily: root.bar.fontFamily
+            bordered: true
+            onClicked: root.systemctl(root.phase === "failed" ? "restart" : "start")
+          }
 
-            PanelSectionHeader {
-              id: settingsHeader
-              anchors.left: parent.left
-              anchors.verticalCenter: parent.verticalCenter
-              text: "SETTINGS"
-              foreground: root.bar.foreground
-              fontFamily: root.bar.fontFamily
+          // ---- pairing ----
+          // The app's QR code takes this one's place while it's open: get the
+          // app first, then pair.
+          Column {
+            visible: root.pairing !== null && !root.appOpen
+            width: parent.width
+            spacing: Style.space(10)
+
+            QrCode {
+              rows: root.pairing ? root.pairing.qr : []
+              width: Math.min(parent.width, Style.space(250))
+              height: width
+              anchors.horizontalCenter: parent.horizontalCenter
             }
 
             Text {
-              anchors.right: parent.right
-              anchors.verticalCenter: parent.verticalCenter
-              // nf-md-chevron_down / chevron_up
-              text: root.settingsOpen ? "󰅃" : "󰅀"
+              width: parent.width
+              horizontalAlignment: Text.AlignHCenter
+              text: "One phone · expires in " + Math.floor(root.secondsLeft / 60) + ":" + ("0" + (root.secondsLeft % 60)).slice(-2)
+              textFormat: Text.PlainText
               color: Util.alpha(root.bar.foreground, 0.6)
               font.family: root.bar.fontFamily
-              font.pixelSize: Style.font.body
+              font.pixelSize: Style.font.caption
             }
 
-            MouseArea {
-              anchors.fill: parent
-              cursorShape: Qt.PointingHandCursor
-              onClicked: {
-                root.settingsOpen = !root.settingsOpen
-                if (root.settingsOpen) {
-                  hostField.text = root.state.host_name || ""
-                  portField.text = String(root.state.port || 47800)
-                }
+            Text {
+              visible: !!(root.pairing && root.pairing.fingerprint)
+              width: parent.width
+              horizontalAlignment: Text.AlignHCenter
+              text: "Fingerprint " + (root.pairing ? root.pairing.fingerprint : "") + " · the phone shows the same code"
+              textFormat: Text.PlainText
+              wrapMode: Text.WordWrap
+              color: Util.alpha(root.bar.foreground, 0.6)
+              font.family: root.bar.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+
+            Row {
+              id: pairActions
+              width: parent.width
+              spacing: Style.space(6)
+              readonly property real cellWidth: (width - spacing) / 2
+
+              Button {
+                width: pairActions.cellWidth
+                text: root.copied ? "Copied" : "Copy link"
+                iconText: "󰆏"
+                tooltipText: "For pasting into the app when the camera can't scan"
+                foreground: root.bar.foreground
+                fontFamily: root.bar.fontFamily
+                bordered: true
+                onClicked: root.copyLink()
               }
+
+              Button {
+                width: pairActions.cellWidth
+                text: "Cancel"
+                foreground: root.bar.foreground
+                fontFamily: root.bar.fontFamily
+                bordered: true
+                onClicked: root.cancelPairing()
+              }
+            }
+          }
+
+          Button {
+            visible: root.running && root.pairing === null
+            width: parent.width
+            text: devicesModel.count === 0 ? "Pair a phone" : "Pair another phone"
+            // nf-md-qrcode
+            iconText: "󰐲"
+            foreground: root.bar.foreground
+            fontFamily: root.bar.fontFamily
+            bordered: true
+            onClicked: root.startPairing()
+          }
+
+          // ---- the phone apps ----
+          Row {
+            id: appButtons
+            width: parent.width
+            spacing: Style.space(6)
+            readonly property real cellWidth: (width - spacing) / 2
+            readonly property string closeText: root.pairing ? "Back to pairing" : "Hide link"
+
+            Button {
+              width: appButtons.cellWidth
+              text: root.appShown === "android" ? appButtons.closeText : "Android app"
+              // nf-md-android
+              iconText: "󰀲"
+              tooltipText: "A QR code and link to the latest Omakey APK"
+              foreground: root.bar.foreground
+              fontFamily: root.bar.fontFamily
+              bordered: true
+              onClicked: root.appShown = root.appShown === "android" ? "" : "android"
+            }
+
+            Button {
+              width: appButtons.cellWidth
+              text: root.appShown === "ios" ? appButtons.closeText : "iPhone app"
+              // nf-md-apple
+              iconText: "󰀵"
+              tooltipText: "A QR code and link to the iPhone app"
+              foreground: root.bar.foreground
+              fontFamily: root.bar.fontFamily
+              bordered: true
+              onClicked: root.appShown = root.appShown === "ios" ? "" : "ios"
             }
           }
 
           Column {
-            visible: root.settingsOpen
+            visible: root.appOpen
+            width: parent.width
+            spacing: Style.space(10)
+
+            QrCode {
+              rows: root.app.qr
+              width: Math.min(parent.width, Style.space(220))
+              height: width
+              anchors.horizontalCenter: parent.horizontalCenter
+            }
+
+            Text {
+              width: parent.width
+              horizontalAlignment: Text.AlignHCenter
+              text: root.app.about
+              textFormat: Text.PlainText
+              wrapMode: Text.WordWrap
+              color: Util.alpha(root.bar.foreground, 0.6)
+              font.family: root.bar.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+
+            Row {
+              id: appActions
+              width: parent.width
+              spacing: Style.space(6)
+              readonly property real cellWidth: (width - spacing) / 2
+
+              Button {
+                width: appActions.cellWidth
+                text: "Open in browser"
+                // nf-md-open_in_new
+                iconText: "󰏌"
+                foreground: root.bar.foreground
+                fontFamily: root.bar.fontFamily
+                bordered: true
+                onClicked: root.openAppPage()
+              }
+
+              Button {
+                width: appActions.cellWidth
+                text: root.appCopied ? "Copied" : "Copy link"
+                iconText: "󰆏"
+                foreground: root.bar.foreground
+                fontFamily: root.bar.fontFamily
+                bordered: true
+                onClicked: root.copyAppLink()
+              }
+            }
+          }
+
+          // ---- phones ----
+          PanelSeparator {
+            visible: devicesModel.count > 0
+            foreground: root.bar.foreground
+          }
+
+          Column {
+            visible: devicesModel.count > 0
+            width: parent.width
+            spacing: Style.space(10)
+
+            PanelSectionHeader {
+              text: "PHONES"
+              foreground: root.bar.foreground
+              fontFamily: root.bar.fontFamily
+            }
+
+            Repeater {
+              model: devicesModel
+
+              Item {
+                id: deviceRow
+                required property string deviceId
+                required property string name
+                required property bool online
+                required property string addr
+                required property string transport
+                required property real loss
+                required property int held
+                required property real lastSeen
+                readonly property bool live: online && root.running
+                readonly property bool renaming: root.renamingId === deviceId
+                readonly property bool confirming: root.confirmForgetId === deviceId
+
+                width: parent.width
+                height: Math.max(info.implicitHeight, actions.height)
+
+                Rectangle {
+                  id: dot
+                  width: Style.space(7)
+                  height: width
+                  radius: width / 2
+                  anchors.left: parent.left
+                  anchors.verticalCenter: parent.verticalCenter
+                  color: deviceRow.live ? root.connectedColor : Util.alpha(root.bar.foreground, 0.25)
+                }
+
+                Column {
+                  id: info
+                  anchors.left: dot.right
+                  anchors.leftMargin: Style.space(10)
+                  anchors.right: actions.left
+                  anchors.rightMargin: Style.space(8)
+                  anchors.verticalCenter: parent.verticalCenter
+                  spacing: Style.space(2)
+
+                  Text {
+                    visible: !deviceRow.renaming
+                    width: parent.width
+                    text: deviceRow.name
+                    textFormat: Text.PlainText
+                    elide: Text.ElideRight
+                    color: root.bar.foreground
+                    font.family: root.bar.fontFamily
+                    font.pixelSize: Style.font.body
+                  }
+
+                  TextField {
+                    id: nameField
+                    visible: deviceRow.renaming
+                    width: parent.width
+                    foreground: root.bar.foreground
+                    placeholderText: "Phone name"
+                    maximumLength: 64
+                    onVisibleChanged: if (visible) {
+                      text = deviceRow.name
+                      forceActiveFocus()
+                      selectAll()
+                    }
+                    onAccepted: root.rename(deviceRow.deviceId, text)
+                    Keys.onEscapePressed: root.renamingId = ""
+                  }
+
+                  Text {
+                    width: parent.width
+                    text: deviceRow.confirming ? "Forget this phone? It will need a new QR code."
+                      : deviceRow.renaming ? "Enter to save, Esc to cancel"
+                      : deviceRow.live ? "Connected · "
+                        + (deviceRow.transport === "bluetooth" ? "Bluetooth" : "Wi-Fi " + deviceRow.addr)
+                        + (deviceRow.loss >= 1 ? " · " + Math.round(deviceRow.loss) + "% lost" : "")
+                        + (deviceRow.held > 0 ? " · " + deviceRow.held + " held" : "")
+                      : "Last seen " + root.ago(deviceRow.lastSeen)
+                    textFormat: Text.PlainText
+                    elide: Text.ElideRight
+                    wrapMode: deviceRow.confirming ? Text.WordWrap : Text.NoWrap
+                    color: deviceRow.confirming ? Color.urgent : Util.alpha(root.bar.foreground, 0.6)
+                    font.family: root.bar.fontFamily
+                    font.pixelSize: Style.font.caption
+                  }
+                }
+
+                Row {
+                  id: actions
+                  anchors.right: parent.right
+                  anchors.verticalCenter: parent.verticalCenter
+                  spacing: Style.space(2)
+
+                  // Normal: rename, forget.
+                  PanelActionButton {
+                    visible: !deviceRow.renaming && !deviceRow.confirming
+                    // nf-md-pencil
+                    iconText: "󰏫"
+                    tooltipText: "Rename"
+                    foreground: root.bar.foreground
+                    enabled: root.running
+                    onClicked: {
+                      root.confirmForgetId = ""
+                      root.renamingId = deviceRow.deviceId
+                    }
+                  }
+
+                  PanelActionButton {
+                    visible: !deviceRow.renaming && !deviceRow.confirming
+                    // nf-md-link_off
+                    iconText: "󰌸"
+                    tooltipText: "Forget this phone"
+                    foreground: root.bar.foreground
+                    enabled: root.running
+                    onClicked: {
+                      root.renamingId = ""
+                      root.confirmForgetId = deviceRow.deviceId
+                    }
+                  }
+
+                  // Renaming: save.
+                  PanelActionButton {
+                    visible: deviceRow.renaming
+                    // nf-md-check
+                    iconText: "󰄬"
+                    tooltipText: "Save"
+                    foreground: root.bar.foreground
+                    onClicked: root.rename(deviceRow.deviceId, nameField.text)
+                  }
+
+                  // Confirming: forget / keep.
+                  Button {
+                    visible: deviceRow.confirming
+                    text: "Forget"
+                    foreground: Color.urgent
+                    fontFamily: root.bar.fontFamily
+                    fontSize: Style.font.bodySmall
+                    bordered: true
+                    onClicked: root.forget(deviceRow.deviceId)
+                  }
+
+                  Button {
+                    visible: deviceRow.confirming
+                    text: "Keep"
+                    foreground: root.bar.foreground
+                    fontFamily: root.bar.fontFamily
+                    fontSize: Style.font.bodySmall
+                    onClicked: root.confirmForgetId = ""
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        // ---- settings page ----
+        Column {
+          visible: root.settingsOpen
+          width: parent.width
+          spacing: Style.space(14)
+
+          Row {
+            spacing: Style.space(8)
+
+            PanelActionButton {
+              anchors.verticalCenter: parent.verticalCenter
+              // nf-md-arrow_left
+              iconText: "󰁍"
+              tooltipText: "Back"
+              foreground: root.bar.foreground
+              onClicked: root.settingsOpen = false
+            }
+
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              text: "Settings"
+              textFormat: Text.PlainText
+              color: root.bar.foreground
+              font.family: root.bar.fontFamily
+              font.pixelSize: Style.font.title
+              font.bold: true
+            }
+          }
+
+          Item {
+            visible: root.wake !== null
+            width: parent.width
+            height: Math.max(wakeTexts.implicitHeight, wakeButton.implicitHeight)
+
+            Column {
+              id: wakeTexts
+              anchors.left: parent.left
+              anchors.right: wakeButton.visible ? wakeButton.left : parent.right
+              anchors.rightMargin: wakeButton.visible ? Style.space(8) : 0
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.space(2)
+
+              Text {
+                text: "Wake on LAN"
+                textFormat: Text.PlainText
+                color: root.bar.foreground
+                font.family: root.bar.fontFamily
+                font.pixelSize: Style.font.body
+              }
+
+              Text {
+                width: parent.width
+                text: root.wakeText
+                textFormat: Text.PlainText
+                wrapMode: Text.WordWrap
+                color: Util.alpha(root.bar.foreground, 0.7)
+                font.family: root.bar.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+            }
+
+            Button {
+              id: wakeButton
+              visible: root.wake !== null && (root.wake.supported || root.wake.on)
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              text: root.wake && root.wake.on ? "Turn off" : "Turn on"
+              foreground: root.bar.foreground
+              fontFamily: root.bar.fontFamily
+              fontSize: Style.font.bodySmall
+              bordered: true
+              onClicked: root.setWake(!root.wake.on)
+            }
+          }
+
+          PanelSeparator {
+            visible: root.wake !== null
+            foreground: root.bar.foreground
+          }
+
+          Column {
             width: parent.width
             spacing: Style.space(8)
 
@@ -949,20 +1095,38 @@ Panel {
               onClicked: root.saveSettings(hostField.text, portField.text)
             }
           }
-        }
 
-        // ---- footer ----
-        Text {
-          visible: root.running
-          width: parent.width
-          text: (root.state.host_name || "") + " · UDP " + (root.state.port || "")
-                + (root.bluetoothText ? " · " + root.bluetoothText : "") + "\n" + (root.state.addresses || []).join(", ")
-          textFormat: Text.PlainText
-          wrapMode: Text.WordWrap
-          lineHeight: 1.2
-          color: Util.alpha(root.bar.foreground, 0.45)
-          font.family: root.bar.fontFamily
-          font.pixelSize: Style.font.caption
+          PanelSeparator {
+            foreground: root.bar.foreground
+          }
+
+          Column {
+            width: parent.width
+            spacing: Style.space(4)
+
+            PanelSectionHeader {
+              text: "THIS COMPUTER"
+              foreground: root.bar.foreground
+              fontFamily: root.bar.fontFamily
+            }
+
+            Text {
+              width: parent.width
+              text: (root.running
+                      ? (root.state.host_name || "") + " · UDP " + (root.state.port || "")
+                        + (root.bluetoothText ? " · " + root.bluetoothText : "")
+                        + "\n" + (root.state.addresses || []).join(", ") + "\n"
+                      : "")
+                    + "Plugin " + (root.pluginVersion || "?") + " · omakeyd "
+                    + (root.running && root.state.daemon_version ? root.state.daemon_version : "not running")
+              textFormat: Text.PlainText
+              wrapMode: Text.WordWrap
+              lineHeight: 1.2
+              color: Util.alpha(root.bar.foreground, 0.7)
+              font.family: root.bar.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+          }
         }
       }
     }
