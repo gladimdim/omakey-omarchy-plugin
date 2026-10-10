@@ -17,7 +17,7 @@ Panel {
 
   readonly property string bin: "/usr/local/bin/omakeyd"
   // The omakeyd version this widget expects; an older one gets an Update button.
-  readonly property string expectedVersion: "1.3.0"
+  readonly property string expectedVersion: "1.4.0"
   readonly property string pluginDir: String(Qt.resolvedUrl(".")).replace(/^file:\/\//, "").replace(/\/$/, "")
   // Like omakeyd, never fall back to a shared directory such as /tmp.
   readonly property string statePath: Quickshell.env("XDG_RUNTIME_DIR")
