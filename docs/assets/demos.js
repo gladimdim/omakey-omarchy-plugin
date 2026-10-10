@@ -73,6 +73,32 @@
   };
 
   /* ═══ The wire: lost packets heal, silence releases ══════ */
+  /* A packet flying along a .wire, phone (left) to computer (right) or
+     back. A lost one stops halfway and fades with `lostText`. */
+  const flyPacket = (root, cls, text, fromLeft, lost, onArrive, lostText = "✕ lost") => {
+    const air = $(".wire", root);
+    const p = el("div", "wire-pkt " + cls, text);
+    air.appendChild(p);
+    // Phones stack the nodes (phone on top), so packets fly down instead of across.
+    const vertical = window.matchMedia("(max-width: 600px)").matches;
+    let a, b;
+    if (vertical) {
+      const nl = $(".wire-node.l", root), nr = $(".wire-node.r", root);
+      const top = nl.offsetTop + nl.offsetHeight + 6, bottom = nr.offsetTop - 6 - p.offsetHeight;
+      a = fromLeft ? top : bottom; b = fromLeft ? bottom : top;
+    } else {
+      const span = air.clientWidth - 175 * 2 - p.offsetWidth;
+      a = fromLeft ? 0 : span; b = fromLeft ? span : 0;
+    }
+    const at = (v) => vertical ? "translate(-50%," + v + "px)" : "translate(" + v + "px,-50%)";
+    const dur = (reduced() ? 300 : 1100);
+    const anim = p.animate([{ transform: at(a) }, { transform: at(lost ? (a + b) / 2 : b) }], { duration: lost ? dur / 2 : dur, easing: "linear", fill: "forwards" });
+    anim.onfinish = () => {
+      if (lost) { p.textContent = lostText; p.classList.add("lost"); setTimeout(() => (p.style.opacity = 0), 200); setTimeout(() => p.remove(), 700); return; }
+      p.remove(); onArrive && onArrive();
+    };
+  };
+
   OMK.initWire = (root) => {
     const air = $(".wire", root);
     const phoneSet = $(".wire-node.l .set", root), phoneSt = $(".wire-node.l .st", root);
@@ -90,28 +116,7 @@
       phoneSt.textContent = performance.now() < silentUntil ? "silent (pocketed, crashed…)" : stats.sent + " sent · " + stats.lost + " lost";
       phoneSt.className = "st" + (performance.now() < silentUntil ? " bad" : "");
     };
-    const fly = (cls, text, fromLeft, lost, onArrive) => {
-      const p = el("div", "wire-pkt " + cls, text);
-      air.appendChild(p);
-      // Phones stack the nodes (phone on top), so packets fly down instead of across.
-      const vertical = window.matchMedia("(max-width: 600px)").matches;
-      let a, b;
-      if (vertical) {
-        const nl = $(".wire-node.l", root), nr = $(".wire-node.r", root);
-        const top = nl.offsetTop + nl.offsetHeight + 6, bottom = nr.offsetTop - 6 - p.offsetHeight;
-        a = fromLeft ? top : bottom; b = fromLeft ? bottom : top;
-      } else {
-        const span = air.clientWidth - 175 * 2 - p.offsetWidth;
-        a = fromLeft ? 0 : span; b = fromLeft ? span : 0;
-      }
-      const at = (v) => vertical ? "translate(-50%," + v + "px)" : "translate(" + v + "px,-50%)";
-      const dur = (reduced() ? 300 : 1100);
-      const anim = p.animate([{ transform: at(a) }, { transform: at(lost ? (a + b) / 2 : b) }], { duration: lost ? dur / 2 : dur, easing: "linear", fill: "forwards" });
-      anim.onfinish = () => {
-        if (lost) { p.textContent = "✕ lost"; p.classList.add("lost"); setTimeout(() => (p.style.opacity = 0), 200); setTimeout(() => p.remove(), 700); return; }
-        p.remove(); onArrive && onArrive();
-      };
-    };
+    const fly = (cls, text, fromLeft, lost, onArrive) => flyPacket(root, cls, text, fromLeft, lost, onArrive);
     const send = () => {
       if (performance.now() < silentUntil) return render();
       seq++;
@@ -160,6 +165,81 @@
       if (e[0].isIntersecting) timer = setInterval(send, 100 * SLOW);
     }).observe(air);
     render();
+  };
+
+  /* ═══ Wake on LAN ════════════════════════════════════════ */
+  /* Put the computer to sleep, then open it on the phone: HELLOs go
+     unanswered, after 2 s the phone sends the magic packet, the computer
+     wakes and the next HELLO gets its WELCOME. */
+  OMK.initWake = (root) => {
+    const host = OMK.state.hostName;
+    const pSet = $(".wire-node.l .set", root), pSt = $(".wire-node.l .st", root);
+    const desk = $(".wire-node.r", root), dSet = $(".set", desk), dSt = $(".st", desk);
+    const sleepBtn = $('[data-k="sleep"]', root), openBtn = $('[data-k="open"]', root);
+    const MAC = "a4:5e:60:1c:2b:9f";
+    let awake = true, waking = false, connected = true, busy = false, touched = false;
+    const timers = [];
+    const later = (ms, f) => timers.push(setTimeout(f, ms));
+    const show = (node, set, st, cls = "") => { node.set.textContent = set; node.st.textContent = st; node.st.className = "st " + cls; };
+    const phone = { set: pSet, st: pSt }, comp = { set: dSet, st: dSt };
+    const renderDesk = () => {
+      desk.classList.toggle("asleep", !awake);
+      if (awake) show(comp, "● awake\nomakeyd listening", "", "ok");
+      else if (waking) show(comp, "☀ waking up…", "magic packet matched its MAC");
+      else show(comp, "☾ asleep\nWi-Fi listens for " + MAC, "");
+    };
+    const buttons = () => { sleepBtn.disabled = busy || !awake; openBtn.disabled = busy || connected; };
+    const sleep = () => {
+      if (busy || !awake) return;
+      awake = false; connected = false;
+      show(phone, "○ Asleep or off\nopening it wakes it", "");
+      renderDesk(); buttons();
+    };
+    const open = () => {
+      if (busy || connected) return;
+      busy = true; buttons();
+      const t0 = performance.now();
+      let wakes = 0;
+      show(phone, "● Connecting to " + host + "…", "HELLO", "");
+      const hello = () => {
+        if (connected) return;
+        fly("", "HELLO", !awake, () => {
+          if (connected) return;
+          // Awake: the WELCOME comes back and the keyboard is on.
+          fly("ack", "WELCOME", false, () => {
+            if (connected) return;
+            connected = true; busy = false;
+            show(phone, "● " + host + " · 4 ms", wakes ? "woke and connected in " + ((performance.now() - t0) / 1000).toFixed(1) + " s" : "connected in 4 ms, no wake needed", "ok");
+            buttons();
+          }, true);
+        }, false, "✕ no answer");
+        later(1300, hello);
+      };
+      hello();
+      // No answer within 2 s: wake it.
+      later(2000, () => {
+        if (connected) return;
+        wakes++;
+        show(phone, "● Waking " + host + "…", "magic packet to the broadcast address", "");
+        fly("magic", "✦ FF×6 · MAC×16", false, () => {
+          if (awake) return;
+          waking = true; renderDesk();
+          later(1300, () => { waking = false; awake = true; renderDesk(); });
+        });
+      });
+    };
+    const fly = (cls, text, lost, onArrive, fromDesk, lostText) => flyPacket(root, cls, text, !fromDesk, lost, onArrive, lostText);
+    sleepBtn.addEventListener("click", () => { touched = true; sleep(); });
+    openBtn.addEventListener("click", () => { touched = true; open(); });
+    show(phone, "● " + host + " · 4 ms", "connected", "ok");
+    renderDesk(); buttons();
+    // Play it once by itself when it scrolls into view, unless someone already did.
+    new IntersectionObserver((entries, io) => {
+      if (!entries[0].isIntersecting) return;
+      io.disconnect();
+      later(1200, () => !touched && sleep());
+      later(3000, () => !touched && open());
+    }, { threshold: 0.5 }).observe(root);
   };
 
   /* ═══ Layout gallery ═════════════════════════════════════ */

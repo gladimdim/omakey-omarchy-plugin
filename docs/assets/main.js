@@ -99,6 +99,7 @@
   /* ── Small demos ────────────────────────────────────────── */
   OMK.initTimeline($("#timeline"));
   OMK.initWire($("#wire"));
+  OMK.initWake($("#wake-demo"));
   OMK.initGallery($("#gallery"));
   OMK.initCli($("#cli-box"));
   OMK.initPortrait($("#portrait"));

@@ -41,6 +41,7 @@
       <a href="#touchpad">Touchpad</a>
       <a href="#portrait">Portrait</a>
       <a href="#widget">Widget</a>
+      <a href="#wake">Wake on LAN</a>
       <a href="#layouts">Layouts</a>
       <a href="#security">Security</a>
     </nav>
@@ -243,6 +244,30 @@
           <div id="pair-phone"></div>
         </div>
         <p class="caption">The widget wears your Omarchy theme. Pick one above. After pairing, the phone finds the desktop by itself over mDNS, even when its IP address changes. The QR code here is a demo and can't be scanned.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="feature reveal-up" id="wake">
+    <div class="wrap">
+      <div class="copy">
+        <p class="eyebrow">Wake on LAN <span class="new">New in 1.4</span></p>
+        <h2>Asleep? Your phone wakes it.</h2>
+        <p>Tap a sleeping computer in the app. When it doesn't answer, the phone sends a <strong>Wake-on-LAN magic packet</strong> across your network, and the keyboard connects the moment the computer is up.</p>
+        <p>Turn it on once in the bar widget's <strong>Settings → Wake on LAN</strong>, or with <code>omakeyd wake-on-lan on</code>. It stays on after a reboot. Over Wi-Fi the computer wakes from sleep; over Ethernet, from power-off too.</p>
+        <p>The app shows a sleeping computer as <strong>Asleep or off · opening it wakes it</strong>, and you can turn waking off in its Settings.</p>
+      </div>
+      <div class="media" id="wake-demo">
+        <div class="wire">
+          <div class="wire-node l"><b>Phone</b><div class="set"></div><div class="st"></div></div>
+          <div class="wire-air"></div>
+          <div class="wire-node r"><b>Computer</b><div class="set"></div><div class="st"></div></div>
+        </div>
+        <div class="wire-ctl">
+          <button type="button" class="ghost" data-k="sleep">Put it to sleep</button>
+          <button type="button" class="ghost" data-k="open">Open it on the phone</button>
+        </div>
+        <p class="caption">Slowed down. The phone waits 2 s for an answer, then sends the magic packet (six FF bytes, then the computer's MAC address 16 times) to the network's broadcast address, and again every 5 s while it wakes. It works on the same network, also with a VPN like Tailscale on. Android today; the iPhone app is next.</p>
       </div>
     </div>
   </section>
